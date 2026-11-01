@@ -74,6 +74,13 @@ describe("Repository", () => {
     expect(itemOf(b?.id ?? "")?.checkedStoreId).toBeNull();
   });
 
+  it("チェックの前に向きを切り替えても、最初のチェックで店舗を聞く", () => {
+    const [a, b] = [add("品物1"), add("品物2")];
+    repo.setDirection("desc");
+    expect(repo.checkItem(a?.id ?? "")).toBe(true);
+    expect(repo.checkItem(b?.id ?? "")).toBe(false);
+  });
+
   it("間が空くと次のトリップになり、また店舗を聞く", () => {
     const [a, b] = [add("品物1"), add("品物2")];
     repo.checkItem(a?.id ?? "");

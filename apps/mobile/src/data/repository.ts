@@ -121,10 +121,17 @@ export class Repository {
     const now = this.#now();
     const current = this.currentSession();
     const session = { ...(current ?? startSession(now)), touchedAt: now };
+    // 向きを先に切り替えると、チェックの前にセッションができる。店舗をまだ聞いていなければ聞く
+    const first = session.storeId === null && !this.#hasChecksSince(session.startedAt);
     const checked: Item = { ...item, checked: true, checkedAt: now, checkedStoreId: session.storeId, updatedAt: now };
     this.#store.commitNow([{ action: "put", table: "items", row: checked }]);
     this.#saveSession(reviewDirection(session, this.#orderForStore(session.storeId), this.#store.rows("items")));
-    return current === null;
+    return first;
+  }
+
+  #hasChecksSince(startedAt: Iso): boolean {
+    const since = Date.parse(startedAt);
+    return this.#store.rows("items").some((item) => item.checkedAt !== null && Date.parse(item.checkedAt) >= since);
   }
 
   // チェックを外す。そのチェックの記録も消える(学習に使わない)
