@@ -6,7 +6,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: "買い物リスト",
   slug: "shopping-list",
   version: "0.1.0",
-  scheme: "shoppinglist",
+  // 2つ目は Google の OAuth の戻り先(Android クライアントの慣習。パッケージ名の逆ドメイン)
+  scheme: ["shoppinglist", "io.github.inouedaiki.shoppinglist"],
   orientation: "portrait",
   // 明暗は OS の設定に従う(トークンが切り替える)
   userInterfaceStyle: "automatic",
