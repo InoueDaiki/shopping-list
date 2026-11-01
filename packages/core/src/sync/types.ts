@@ -48,18 +48,18 @@ export interface HistoryCursor {
 // 取り込めなかった行。捨てずに報告し、画面で知らせる
 export interface RowIssue {
   table: SyncTable;
-  // リモートでの行の位置
+  // リモートでの行の位置。送信で拒否された操作で、まだ行が無いときは 0
   row: number;
   // ID が読めないときは null
   id: Id | null;
   problems: { column: string; message: string }[];
 }
 
-// 書く前に調べた、リモートの行の位置と版。位置はこの読み取りの時点のもの
+// 書く前に調べた、リモートの行の位置と版。行は消さず足すのも末尾だけなので、位置はずれない
 export interface RemoteRowRef {
   id: Id;
   rowNumber: number;
-  // 版の列が無い表、または読めないときは null
+  // 更新の時刻と墓石の時刻の新しいほう。どちらも読めないときは null
   version: Iso | null;
 }
 
@@ -68,11 +68,13 @@ export type RemoteIndex = Partial<Record<MutableTable, RemoteRowRef[]>>;
 export type RemoteWrite =
   | (RowOf & { kind: "insert" })
   | (RowOf & { kind: "update"; rowNumber: number })
-  | { kind: "delete"; table: MutableTable; rowNumber: number };
+  // 消した印(墓石)を deleted_at に書く。ほかのセルは触らない
+  | { kind: "tombstone"; table: MutableTable; rowNumber: number; at: Iso };
 
 export type TableSnapshot = { [T in MutableTable]: TableRows[T][] };
 
 export interface RemoteSnapshot {
+  // 墓石の行は含めない
   tables: TableSnapshot;
   // cursor より後ろの行。読み直しになったときは前の行も含む(ID で重ねて保存する)
   history: HistoryEntry[];
@@ -83,7 +85,8 @@ export interface RemoteSnapshot {
 export interface RemoteStore {
   // ID と版の列を読む。読み取り1回
   locate(tables: MutableTable[]): Promise<RemoteIndex>;
-  // 順に適用する。全部反映されるか、何も反映されないか。書き込み1回
+  // 順に適用する。全部反映されるか、何も反映されないか。書き込み1回。
+  // 中身を拒否されたら RemoteError(invalid)を投げる。エンジンが分けて送り直す
   write(writes: RemoteWrite[]): Promise<void>;
   // 全部の表と History の続きを読む。読み取り1回(History の読み直しのときだけ2回)
   pull(cursor: HistoryCursor | null): Promise<RemoteSnapshot>;

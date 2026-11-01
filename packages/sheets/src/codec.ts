@@ -134,9 +134,16 @@ interface Codec<T> {
   encode(row: T): Cell[];
 }
 
-const named: Codec<{ id: string; name: string; sort: number }> = {
-  decode: (r) => ({ id: r.id("id"), name: r.text("name"), sort: r.number("sort") }),
-  encode: (row) => [row.id, row.name, row.sort],
+// deleted_at は行の型に持たない。読むときは decodeRow が返し、書くときは空にする
+// (行全体を書くのは put だけで、put は行を生き返らせる)
+const named: Codec<{ id: string; name: string; sort: number; updatedAt: string }> = {
+  decode: (r) => ({
+    id: r.id("id"),
+    name: r.text("name"),
+    sort: r.number("sort"),
+    updatedAt: r.iso("updated_at"),
+  }),
+  encode: (row) => [row.id, row.name, row.sort, row.updatedAt, null],
 };
 
 const stores: Codec<Store> = {
@@ -152,9 +159,10 @@ const stores: Codec<Store> = {
       lat,
       lng,
       createdAt: r.iso("created_at"),
+      updatedAt: r.iso("updated_at"),
     };
   },
-  encode: (row) => [row.id, row.name, row.lat, row.lng, row.createdAt],
+  encode: (row) => [row.id, row.name, row.lat, row.lng, row.createdAt, row.updatedAt, null],
 };
 
 const items: Codec<Item> = {
@@ -181,6 +189,7 @@ const items: Codec<Item> = {
     row.checkedAt,
     row.checkedStoreId,
     row.updatedAt,
+    null,
   ],
 };
 
@@ -190,6 +199,7 @@ const history: Codec<HistoryEntry> = {
     listId: r.id("list_id"),
     name: r.text("name"),
     categoryId: r.optionalId("category_id"),
+    categorySource: r.categorySource("category_source"),
     storeId: r.optionalId("store_id"),
     tripId: r.optionalId("trip_id"),
     checkedAt: r.iso("checked_at"),
@@ -200,6 +210,7 @@ const history: Codec<HistoryEntry> = {
     row.listId,
     row.name,
     row.categoryId,
+    row.categorySource,
     row.storeId,
     row.tripId,
     row.checkedAt,
@@ -219,13 +230,14 @@ const CODECS: { [T in SyncTable]: Codec<TableRows[T]> } = {
       categoryIds: r.idList("category_ids"),
       editedAt: r.iso("edited_at"),
     }),
-    encode: (row) => [row.storeId, row.categoryIds.join(","), row.editedAt],
+    encode: (row) => [row.storeId, row.categoryIds.join(","), row.editedAt, null],
   },
 };
 
 export type Decoded<T extends SyncTable> =
   | { kind: "blank" }
-  | { kind: "row"; row: TableRows[T] }
+  // deletedAt は墓石の時刻。効いているかは行の版と比べて決める(isTombstoned)
+  | { kind: "row"; row: TableRows[T]; deletedAt: string | null }
   | { kind: "issue"; issue: RowIssue };
 
 // rowNumber はシートの1始まりの行の位置。報告に使う
@@ -237,7 +249,9 @@ export function decodeRow<T extends SyncTable>(
   if (cells.every(isEmpty)) return { kind: "blank" };
   const reader = new RowReader(TABLE_SHEETS[table], cells);
   const row = CODECS[table].decode(reader);
-  if (reader.problems.length === 0) return { kind: "row", row };
+  // History には列が無いので常に null になる
+  const deletedAt = reader.optionalIso("deleted_at");
+  if (reader.problems.length === 0) return { kind: "row", row, deletedAt };
   const first = cells[0];
   return {
     kind: "issue",

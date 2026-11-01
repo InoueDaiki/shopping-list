@@ -27,7 +27,7 @@ export interface ResolveCategoryInput extends CategoryLookupInput {
 
 const UNCATEGORIZED: CategoryResolution = { categoryId: null, categorySource: null };
 
-// 記録の強さ。履歴には category_source が無いので、中間の扱いになる
+// 記録の強さ。品目と履歴で同じ。出どころの分からない記録は中間の扱いになる
 const SOURCE_STRENGTH = { user: 2, history: 1, none: 1, inferred: 0 } as const;
 
 interface CategoryRecord {
@@ -58,7 +58,11 @@ export function lookupCategory(input: CategoryLookupInput): CategoryResolution {
       source: item.categorySource,
       at: item.updatedAt,
     })),
-    ...input.history.map((entry) => ({ ...entry, source: null, at: entry.checkedAt })),
+    ...input.history.map((entry) => ({
+      ...entry,
+      source: entry.categorySource,
+      at: entry.checkedAt,
+    })),
   ];
 
   let best: CategoryRecord | null = null;

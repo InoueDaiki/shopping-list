@@ -29,7 +29,13 @@ function shuffled<T>(values: readonly T[], random: () => number): T[] {
 }
 
 const categoryIds = Array.from({ length: 16 }, (_, i) => `cat-${String(i).padStart(2, "0")}`);
-const categories: Category[] = categoryIds.map((id, sort) => ({ id, name: id, sort }));
+const category = (id: Id, sort: number): Category => ({
+  id,
+  name: id,
+  sort,
+  updatedAt: "2028-01-01T00:00:00.000Z",
+});
+const categories: Category[] = categoryIds.map(category);
 
 type TripKind = "forward" | "backward" | "detour" | "batch";
 
@@ -373,7 +379,7 @@ describe("learnCategoryOrder", () => {
 
   it("カテゴリ30個、トリップ300回でも一瞬で終わる", () => {
     const manyIds = Array.from({ length: 30 }, (_, i) => `many-${String(i).padStart(2, "0")}`);
-    const manyCategories = manyIds.map((id, sort) => ({ id, name: id, sort }));
+    const manyCategories = manyIds.map(category);
     const random = seededRandom(2);
     const truth = shuffled(manyIds, random);
     const trips = simulate({ truth, kinds: mixedKinds(300, random, 0.2), random });

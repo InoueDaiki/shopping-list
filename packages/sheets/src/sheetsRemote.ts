@@ -1,9 +1,12 @@
 // RemoteStore のスプレッドシートの実装。
 // 書き込みは batchUpdate の1回にまとめる。全部反映されるか何も反映されないかになり、回数も1回で済む。
+// 行は消さない。行の位置がずれないので、locate と write の間に別の端末が書いても別の行を上書きしない。
 
 import {
   RemoteError,
   compareIso,
+  isTombstoned,
+  newestVersion,
   rowId,
   rowVersion,
   type HistoryCursor,
@@ -30,6 +33,7 @@ import {
   SCHEMA_VERSION,
   SHEETS,
   TABLE_SHEETS,
+  columnIndex,
   dataRange,
   headerRange,
   type SheetName,
@@ -37,10 +41,14 @@ import {
 import { parseSpreadsheetId } from "./spreadsheetId.ts";
 
 const FIRST_DATA_ROW = 2;
-const VERSION_COLUMNS: Partial<Record<MutableTable, string>> = {
+const VERSION_COLUMNS: Record<MutableTable, string> = {
+  lists: "updated_at",
+  categories: "updated_at",
+  stores: "updated_at",
   items: "updated_at",
   storeOrders: "edited_at",
 };
+const DELETED_AT = "deleted_at";
 const TABLES: readonly MutableTable[] = [
   "lists",
   "categories",
@@ -106,24 +114,34 @@ export async function openSpreadsheet(
   return { spreadsheetId };
 }
 
-// 同じ ID の行が重なっていたら、新しいほうを1行だけ取る
-function latestById<T extends MutableTable>(table: T, rows: TableRows[T][]): TableRows[T][] {
-  const latest = new Map<Id, TableRows[T]>();
-  for (const row of rows) {
-    const change = { table, row } as RowOf;
+interface ReadRow<T extends MutableTable> {
+  row: TableRows[T];
+  deletedAt: string | null;
+}
+
+// 同じ ID の行が重なっていたら、新しいほうを1行だけ取る。それが墓石なら返さない
+function liveRows<T extends MutableTable>(table: T, rows: ReadRow<T>[]): TableRows[T][] {
+  const latest = new Map<Id, ReadRow<T> & { version: string | null }>();
+  for (const read of rows) {
+    const change = { table, row: read.row } as RowOf;
     const id = rowId(change);
     const current = latest.get(id);
-    const version = rowVersion(change);
-    const currentVersion =
-      current === undefined ? null : rowVersion({ table, row: current } as RowOf);
+    const version = newestVersion(rowVersion(change), read.deletedAt);
     if (
       current === undefined ||
-      (version !== null && currentVersion !== null && compareIso(version, currentVersion) > 0)
+      (version !== null &&
+        current.version !== null &&
+        compareIso(version, current.version) > 0)
     ) {
-      latest.set(id, row);
+      latest.set(id, { ...read, version });
     }
   }
-  return [...latest.values()];
+  return [...latest.values()]
+    .filter(
+      ({ row, deletedAt }) =>
+        !isTombstoned(rowVersion({ table, row } as RowOf), deletedAt),
+    )
+    .map(({ row }) => row);
 }
 
 function emptyTables(): TableSnapshot {
@@ -163,18 +181,22 @@ export class SheetsRemote implements RemoteStore {
     const index: RemoteIndex = {};
     tables.forEach((table, i) => {
       const def = TABLE_SHEETS[table];
-      const versionName = VERSION_COLUMNS[table];
-      const versionAt = def.columns.findIndex((column) => column.name === versionName);
+      const versionAt = columnIndex(def, VERSION_COLUMNS[table]);
+      const deletedAt = columnIndex(def, DELETED_AT);
       const refs: RemoteRowRef[] = [];
       (ranges[i]?.values ?? []).forEach((cells, offset) => {
         const id = cells[0];
         if (!isId(id)) return;
         const version = cells[versionAt];
+        const deleted = cells[deletedAt];
         refs.push({
           id,
           rowNumber: FIRST_DATA_ROW + offset,
           // 読めない版は null にして、ローカルの正しい行で上書きできるようにする
-          version: isIso(version) ? version : null,
+          version: newestVersion(
+            isIso(version) ? version : null,
+            isIso(deleted) ? deleted : null,
+          ),
         });
       });
       index[table] = refs;
@@ -190,17 +212,19 @@ export class SheetsRemote implements RemoteStore {
     let appendRows: unknown[] = [];
 
     for (const write of writes) {
-      const sheetId = ids[TABLE_SHEETS[write.table].name];
-      if (write.kind === "delete") {
+      const def = TABLE_SHEETS[write.table];
+      const sheetId = ids[def.name];
+      if (write.kind === "tombstone") {
         appendSheetId = null;
         requests.push({
-          deleteDimension: {
-            range: {
+          updateCells: {
+            start: {
               sheetId,
-              dimension: "ROWS",
-              startIndex: write.rowNumber - 1,
-              endIndex: write.rowNumber,
+              rowIndex: write.rowNumber - 1,
+              columnIndex: columnIndex(def, DELETED_AT),
             },
+            rows: [rowData([write.at])],
+            fields: "userEnteredValue",
           },
         });
         continue;
@@ -288,13 +312,13 @@ export class SheetsRemote implements RemoteStore {
     tables: TableSnapshot,
     issues: RowIssue[],
   ): void {
-    const rows: TableRows[T][] = [];
+    const rows: ReadRow<T>[] = [];
     (range?.values ?? []).forEach((cells, offset) => {
       const decoded = decodeRow(table, cells, FIRST_DATA_ROW + offset);
-      if (decoded.kind === "row") rows.push(decoded.row);
+      if (decoded.kind === "row") rows.push(decoded);
       if (decoded.kind === "issue") issues.push(decoded.issue);
     });
-    (tables as unknown as Record<T, TableRows[T][]>)[table] = latestById(table, rows);
+    (tables as unknown as Record<T, TableRows[T][]>)[table] = liveRows(table, rows);
   }
 }
 

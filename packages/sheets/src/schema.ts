@@ -2,7 +2,7 @@
 
 import type { SyncTable } from "@shopping-list/core";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const ID_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
 export const ID_LIST_PATTERN = "^([A-Za-z0-9_-]{1,64}(,[A-Za-z0-9_-]{1,64})*)?$";
@@ -58,18 +58,32 @@ const ref = (name: string, target: SheetName): Column => ({
 const text = (name: string): Column => ({ name, kind: "text" });
 const iso = (name: string): Column => ({ name, kind: "iso" });
 
+const CATEGORY_SOURCES = ["history", "inferred", "user"] as const;
+
 export const SHEETS: readonly SheetDef[] = [
   {
     name: "Lists",
     sheetId: 101,
     rowCount: 200,
-    columns: [id("id"), text("name"), { name: "sort", kind: "number" }],
+    columns: [
+      id("id"),
+      text("name"),
+      { name: "sort", kind: "number" },
+      iso("updated_at"),
+      iso("deleted_at"),
+    ],
   },
   {
     name: "Categories",
     sheetId: 102,
     rowCount: 200,
-    columns: [id("id"), text("name"), { name: "sort", kind: "number" }],
+    columns: [
+      id("id"),
+      text("name"),
+      { name: "sort", kind: "number" },
+      iso("updated_at"),
+      iso("deleted_at"),
+    ],
   },
   {
     name: "Stores",
@@ -81,6 +95,8 @@ export const SHEETS: readonly SheetDef[] = [
       { name: "lat", kind: "number", min: -90, max: 90 },
       { name: "lng", kind: "number", min: -180, max: 180 },
       iso("created_at"),
+      iso("updated_at"),
+      iso("deleted_at"),
     ],
   },
   {
@@ -92,16 +108,13 @@ export const SHEETS: readonly SheetDef[] = [
       ref("list_id", "Lists"),
       text("name"),
       ref("category_id", "Categories"),
-      {
-        name: "category_source",
-        kind: "enum",
-        values: ["history", "inferred", "user"],
-      },
+      { name: "category_source", kind: "enum", values: CATEGORY_SOURCES },
       text("memo"),
       { name: "checked", kind: "bool" },
       iso("checked_at"),
       ref("checked_store_id", "Stores"),
       iso("updated_at"),
+      iso("deleted_at"),
     ],
   },
   {
@@ -113,6 +126,7 @@ export const SHEETS: readonly SheetDef[] = [
       id("list_id"),
       text("name"),
       id("category_id"),
+      { name: "category_source", kind: "enum", values: CATEGORY_SOURCES },
       id("store_id"),
       id("trip_id"),
       iso("checked_at"),
@@ -127,6 +141,7 @@ export const SHEETS: readonly SheetDef[] = [
       ref("store_id", "Stores"),
       { name: "category_ids", kind: "idList" },
       iso("edited_at"),
+      iso("deleted_at"),
     ],
   },
   {
@@ -155,6 +170,11 @@ export const TABLE_SHEETS: Readonly<Record<SyncTable, SheetDef>> = {
 };
 
 export const HISTORY_SHEET = TABLE_SHEETS.history;
+
+// 列の位置。無い列は -1
+export function columnIndex(def: SheetDef, name: string): number {
+  return def.columns.findIndex((column) => column.name === name);
+}
 
 // 0 始まりの列の番号を A、B、… にする
 export function columnLetter(index: number): string {

@@ -4,9 +4,11 @@ import { itemFixture } from "./test-support.ts";
 import {
   checksFromItems,
   groupTrips,
+  historyEntriesFromTrip,
   isTripFinished,
   medianCategoryGapMs,
   tripCategorySequence,
+  tripIdOf,
   type CheckRecord,
 } from "./trips.ts";
 
@@ -109,6 +111,66 @@ describe("isTripFinished", () => {
     const [trip] = groupTrips([check("a", 0)]);
     expect(isTripFinished(trip, new Date(START + TRIP_GAP_MS).toISOString())).toBe(false);
     expect(isTripFinished(trip, new Date(START + TRIP_GAP_MS + 1).toISOString())).toBe(true);
+  });
+});
+
+describe("historyEntriesFromTrip", () => {
+  const at = (offsetMs: number) => new Date(START + offsetMs).toISOString();
+  const checked = (id: string, offsetMs: number, overrides = {}) =>
+    itemFixture({
+      id,
+      name: `品目-${id}`,
+      categoryId: "cat-a",
+      categorySource: "user",
+      checked: true,
+      checkedAt: at(offsetMs),
+      checkedStoreId: "store-a",
+      ...overrides,
+    });
+
+  it("チェックの順に履歴の行を作り、品目の内容を写す", () => {
+    const items = [checked("b", 1000), checked("a", 0, { categorySource: "inferred" })];
+    const [trip] = groupTrips(checksFromItems(items));
+    expect(historyEntriesFromTrip(trip, items)).toEqual([
+      {
+        id: "a",
+        listId: "list-a",
+        name: "品目-a",
+        categoryId: "cat-a",
+        categorySource: "inferred",
+        storeId: "store-a",
+        tripId: "a",
+        checkedAt: at(0),
+        checkedSeq: 0,
+      },
+      {
+        id: "b",
+        listId: "list-a",
+        name: "品目-b",
+        categoryId: "cat-a",
+        categorySource: "user",
+        storeId: "store-a",
+        tripId: "a",
+        checkedAt: at(1000),
+        checkedSeq: 1,
+      },
+    ]);
+  });
+
+  it("並びの違う2台でも同じ行になり、履歴から組み直しても同じトリップになる", () => {
+    const items = [checked("a", 0), checked("b", 1000), checked("c", TRIP_GAP_MS * 2)];
+    const entriesOf = (order: typeof items) =>
+      groupTrips(checksFromItems(order)).flatMap((trip) => historyEntriesFromTrip(trip, order));
+
+    const entries = entriesOf(items);
+    expect(entriesOf([...items].reverse())).toEqual(entries);
+    expect(entries.map(({ tripId }) => tripId)).toEqual(["a", "a", "c"]);
+    expect(groupTrips(entries).map(tripIdOf)).toEqual(["a", "c"]);
+  });
+
+  it("品目の無いチェックは除く", () => {
+    const [trip] = groupTrips([check("gone", 0)]);
+    expect(historyEntriesFromTrip(trip, [])).toEqual([]);
   });
 });
 

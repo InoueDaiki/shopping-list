@@ -1,4 +1,4 @@
-import type { HistoryEntry, Item, Store, StoreOrder } from "@shopping-list/core";
+import type { HistoryEntry, Item, ShoppingList, Store, StoreOrder } from "@shopping-list/core";
 import { describe, expect, it } from "vitest";
 
 import type { Cell } from "./client.ts";
@@ -26,7 +26,7 @@ const asRead = (cells: Cell[]) => cells.map((cell) => (cell === null ? "" : cell
 describe("codec", () => {
   it("品目を往復できる", () => {
     const decoded = decodeRow("items", asRead(encodeRow("items", item)), 2);
-    expect(decoded).toEqual({ kind: "row", row: item });
+    expect(decoded).toEqual({ kind: "row", row: item, deletedAt: null });
   });
 
   it("空の値は null に戻す", () => {
@@ -42,6 +42,7 @@ describe("codec", () => {
     expect(decodeRow("items", asRead(encodeRow("items", row)), 2)).toEqual({
       kind: "row",
       row,
+      deletedAt: null,
     });
   });
 
@@ -51,26 +52,48 @@ describe("codec", () => {
       listId: "l1",
       name: "牛乳",
       categoryId: null,
+      categorySource: "user",
       storeId: "s1",
       tripId: "t1",
       checkedAt: AT,
       checkedSeq: 0,
     };
-    const store: Store = { id: "s1", name: "店", lat: null, lng: null, createdAt: AT };
+    const store: Store = {
+      id: "s1",
+      name: "店",
+      lat: null,
+      lng: null,
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    const list: ShoppingList = { id: "l1", name: "スーパー", sort: 1, updatedAt: AT };
     const order: StoreOrder = { storeId: "s1", categoryIds: ["c1", "c2"], editedAt: AT };
 
-    expect(decodeRow("history", asRead(encodeRow("history", history)), 2)).toEqual({
+    expect(decodeRow("history", asRead(encodeRow("history", history)), 2)).toMatchObject({
       kind: "row",
       row: history,
     });
-    expect(decodeRow("stores", asRead(encodeRow("stores", store)), 2)).toEqual({
+    expect(decodeRow("stores", asRead(encodeRow("stores", store)), 2)).toMatchObject({
       kind: "row",
       row: store,
     });
-    expect(decodeRow("storeOrders", asRead(encodeRow("storeOrders", order)), 2)).toEqual({
+    expect(decodeRow("lists", asRead(encodeRow("lists", list)), 2)).toMatchObject({
+      kind: "row",
+      row: list,
+    });
+    expect(decodeRow("storeOrders", asRead(encodeRow("storeOrders", order)), 2)).toMatchObject({
       kind: "row",
       row: order,
     });
+  });
+
+  it("deleted_at を読み、行全体を書くときは空にする", () => {
+    const cells: Cell[] = encodeRow("items", item);
+    expect(cells.at(-1)).toBeNull();
+    cells[cells.length - 1] = AT;
+    expect(decodeRow("items", cells, 2)).toEqual({ kind: "row", row: item, deletedAt: AT });
+    cells[cells.length - 1] = "昨日";
+    expect(decodeRow("items", cells, 2).kind).toBe("issue");
   });
 
   it("不正な行は捨てずに、行と列を添えて報告する", () => {
@@ -91,7 +114,7 @@ describe("codec", () => {
   });
 
   it("ID が読めない行は id を null にする", () => {
-    const decoded = decodeRow("lists", ["日本語の ID", "スーパー", 1], 3);
+    const decoded = decodeRow("lists", ["日本語の ID", "スーパー", 1, AT], 3);
     expect(decoded).toMatchObject({ kind: "issue", issue: { id: null, row: 3 } });
   });
 
@@ -110,8 +133,8 @@ describe("codec", () => {
   });
 
   it("緯度と経度の片方だけ、範囲の外は不正にする", () => {
-    expect(decodeRow("stores", ["s1", "店", 35, "", AT], 2).kind).toBe("issue");
-    expect(decodeRow("stores", ["s1", "店", 91, 139, AT], 2).kind).toBe("issue");
+    expect(decodeRow("stores", ["s1", "店", 35, "", AT, AT], 2).kind).toBe("issue");
+    expect(decodeRow("stores", ["s1", "店", 91, 139, AT, AT], 2).kind).toBe("issue");
   });
 
   it("表の列の数と encode の列の数が合う", () => {
@@ -123,7 +146,7 @@ describe("schema", () => {
   it("範囲の文字列を作る", () => {
     expect(columnLetter(0)).toBe("A");
     expect(columnLetter(26)).toBe("AA");
-    expect(dataRange(TABLE_SHEETS.items)).toBe("Items!A2:J");
-    expect(dataRange(TABLE_SHEETS.history, 50)).toBe("History!A50:H");
+    expect(dataRange(TABLE_SHEETS.items)).toBe("Items!A2:K");
+    expect(dataRange(TABLE_SHEETS.history, 50)).toBe("History!A50:I");
   });
 });
