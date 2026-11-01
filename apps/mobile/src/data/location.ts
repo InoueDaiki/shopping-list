@@ -13,7 +13,8 @@ export async function watchPositionOnce(onPosition: (point: GeoPoint) => void): 
     if (!granted) return null;
     const last = await getLastKnownPositionAsync();
     if (last) onPosition(toPoint(last));
-    const current = toPoint(await getCurrentPositionAsync({ accuracy: Accuracy.Balanced }));
+    // 店舗を選ぶ途中に OS の設定のダイアログを重ねない
+    const current = toPoint(await getCurrentPositionAsync({ accuracy: Accuracy.Balanced, mayShowUserSettingsDialog: false }));
     onPosition(current);
     return current;
   } catch (error) {
