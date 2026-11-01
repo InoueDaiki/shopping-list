@@ -42,6 +42,16 @@ describe("SqliteLocalStore", () => {
     store = new SqliteLocalStore(openTestDatabase());
   });
 
+  it("変わらなかった行は同じオブジェクトのまま返す", () => {
+    store.commitNow([put(item({ id: "a" })), put(item({ id: "b" }))]);
+    const [a, b] = store.rows("items");
+    store.commitNow([put(item({ id: "b", checked: true }))]);
+    const rows = store.rows("items");
+    expect(rows.find((row) => row.id === "a")).toBe(a);
+    expect(rows.find((row) => row.id === "b")).not.toBe(b);
+    expect(rows.find((row) => row.id === "b")?.checked).toBe(true);
+  });
+
   it("行を型のとおりに読み書きする", () => {
     const row = item({ checked: true, checkedAt: AT, categorySource: "user", categoryId: "cat-1", memo: "メモ" });
     store.commitNow([

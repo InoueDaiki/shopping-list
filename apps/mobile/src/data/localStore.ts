@@ -2,6 +2,7 @@
 // 読み取りは表ごとに配列をキャッシュし、変わるまで同じ配列を返す(useSyncExternalStore にそのまま渡せる)
 import {
   changeId,
+  rowId,
   type Category,
   type HistoryCursor,
   type HistoryEntry,
@@ -12,6 +13,7 @@ import {
   type MutableTable,
   type PendingOp,
   type RemoteApply,
+  type RowOf,
   type ShoppingList,
   type Store,
   type StoreOrder,
@@ -161,6 +163,21 @@ function putSql(def: TableDef<unknown>, verb: "INSERT OR REPLACE" | "INSERT OR I
   return `${verb} INTO ${def.name} (${def.columns.join(", ")}) VALUES (${marks})`;
 }
 
+function sameRow(a: object, b: object): boolean {
+  const right = b as Record<string, unknown>;
+  return Object.entries(a).every(([key, value]) => value === right[key]);
+}
+
+// 変わらなかった行は前のオブジェクトを使う。memo した行の部品を描き直さないため
+function reuseRows(table: SyncTable, rows: unknown[], previous: unknown[]): unknown[] {
+  const id = (row: unknown) => rowId({ table, row } as RowOf);
+  const byId = new Map(previous.map((row) => [id(row), row as object]));
+  return rows.map((row) => {
+    const old = byId.get(id(row));
+    return old && sameRow(old, row as object) ? old : row;
+  });
+}
+
 export type StoreTopic = SyncTable | "pending" | "settings";
 
 const HISTORY_CURSOR_KEY = "historyCursor";
@@ -174,6 +191,8 @@ export class SqliteLocalStore implements LocalStore {
   readonly #db: Database;
   readonly #recordPending: boolean;
   readonly #rows = new Map<SyncTable, unknown[]>();
+  // 変更で捨てた配列。次に読むときに、変わらなかった行を引き継ぐ
+  readonly #staleRows = new Map<SyncTable, unknown[]>();
   #settings: Map<string, string> | null = null;
   #pendingCount: number | null = null;
   readonly #listeners = new Map<StoreTopic, Set<() => void>>();
@@ -190,7 +209,10 @@ export class SqliteLocalStore implements LocalStore {
     const cached = this.#rows.get(table);
     if (cached) return cached as TableRows[T][];
     const def = tableDef(table);
-    const rows = this.#db.all<Row>(`SELECT * FROM ${def.name} ORDER BY ${def.orderBy}`).map((row) => def.decode(row));
+    const decoded = this.#db.all<Row>(`SELECT * FROM ${def.name} ORDER BY ${def.orderBy}`).map((row) => def.decode(row));
+    const stale = this.#staleRows.get(table);
+    const rows = stale ? reuseRows(table, decoded, stale) : decoded;
+    this.#staleRows.delete(table);
     this.#rows.set(table, rows);
     return rows as TableRows[T][];
   }
@@ -229,7 +251,11 @@ export class SqliteLocalStore implements LocalStore {
     for (const topic of list) {
       if (topic === "pending") this.#pendingCount = null;
       else if (topic === "settings") this.#settings = null;
-      else this.#rows.delete(topic);
+      else {
+        const cached = this.#rows.get(topic);
+        if (cached) this.#staleRows.set(topic, cached);
+        this.#rows.delete(topic);
+      }
     }
     for (const topic of list) {
       for (const listener of this.#listeners.get(topic) ?? []) listener();
