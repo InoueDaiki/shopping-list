@@ -1,0 +1,37 @@
+# リリース APK がビルドできることを確かめる。時間がかかるので main への push でだけ動かす。
+# Secrets は使わず開発用の鍵で署名する。配布には使わないので、成果物は残さず成功だけを見る
+name: Android
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # CI では .env がないので、mise.toml だけを信頼する
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+
+jobs:
+  build:
+    name: リリース APK のビルド
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # ci.yml と違い MISE_DISABLE_TOOLS を付けず、mise.toml の Java を入れる。Android SDK はランナーのものを使う
+      - uses: ./.github/actions/setup
+        with:
+          mise-cache-prefix: mise-v1-android
+      - name: Gradle のキャッシュ
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - run: mise run build:android

@@ -13,9 +13,42 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   userInterfaceStyle: "automatic",
   android: {
     package: "io.github.inouedaiki.shoppinglist",
+    // 配布のたびに増やす。端末は小さい値では上書きしない
+    versionCode: 1,
     permissions: ["android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION"],
+    // テンプレートが入れるが使わない権限。バイブレーションを使うときは VIBRATE を外す
+    blockedPermissions: [
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.VIBRATE",
+      "android.permission.USE_BIOMETRIC",
+      "android.permission.USE_FINGERPRINT",
+      "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
+    ],
   },
-  plugins: ["expo-router", "expo-secure-store", "expo-web-browser", "expo-sqlite", "expo-location"],
+  plugins: [
+    "expo-router",
+    "expo-secure-store",
+    "expo-web-browser",
+    "expo-sqlite",
+    "expo-location",
+    [
+      "expo-build-properties",
+      {
+        // 配布物を軽くする(docs/設計メモ.md の「配布」)。JS は Hermes(既定)
+        android: {
+          buildArchs: ["arm64-v8a"],
+          enableMinifyInReleaseBuilds: true,
+          enableShrinkResourcesInReleaseBuilds: true,
+          // React Native の Image で GIF と WebP を使わないので、Fresco の分を入れない
+          gifEnabled: false,
+          webpEnabled: false,
+        },
+      },
+    ],
+    "./plugins/with-release-signing.js",
+  ],
   extra: {
     googleOAuthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID ?? "",
   },

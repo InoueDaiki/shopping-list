@@ -1,4 +1,4 @@
-import { X } from "lucide-react-native";
+import X from "lucide-react-native/icons/x";
 import type { ReactNode } from "react";
 import { KeyboardAvoidingView, Modal, Pressable, ScrollView, View } from "react-native";
 
