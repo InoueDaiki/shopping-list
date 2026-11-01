@@ -7,6 +7,8 @@ export const SHOPPING_SYNC_INTERVAL_MS = 30_000;
 export const WRITE_SYNC_DELAY_MS = 3_000;
 // 回数の上限で残したときに、もう一度試すまでの間
 export const DEFERRED_SYNC_DELAY_MS = 20_000;
+// つながらなかったときに、未送信をもう一度試すまでの間
+export const RETRY_SYNC_DELAY_MS = 30_000;
 
 export interface SyncStatus {
   running: boolean;
@@ -24,6 +26,9 @@ export interface SyncRunnerDeps {
   pendingCount: () => number;
   now?: () => number;
 }
+
+// 待てば直る失敗。権限やシートの形の問題は、繰り返しても直らない
+const RETRYABLE_ERRORS: readonly SyncStatus["errorKind"][] = ["offline", "rateLimited", "server"];
 
 const INITIAL: SyncStatus = { running: false, lastStatus: null, errorKind: null, issues: [], lastSyncedAt: null };
 
@@ -88,8 +93,10 @@ export class SyncRunner {
 
   syncNow(): Promise<void> {
     if (this.#paused) return Promise.resolve();
+    // 走っている同期は、後から足された分を送るとは限らない。待っている送信の予約を消さない
+    if (this.#running) return this.#running;
     this.#clearTimer();
-    this.#running ??= this.#run().finally(() => {
+    this.#running = this.#run().finally(() => {
       this.#running = null;
     });
     return this.#running;
@@ -125,6 +132,7 @@ export class SyncRunner {
       if (result.status === "deferred") this.#schedule(DEFERRED_SYNC_DELAY_MS);
       // 同期の途中に足された分だけ送り直す。拒否されて隔離された操作は残り続けるので、数に含めない
       else if (result.status === "ok" && this.#deps.pendingCount() > result.pending) this.#schedule(WRITE_SYNC_DELAY_MS);
+      else if (result.status === "failed") this.#retryLater();
     } catch (error) {
       // シート ID を含むかもしれないので、本文は出さない
       console.warn("同期できなかった", error instanceof Error ? error.name : "unknown");
@@ -133,6 +141,14 @@ export class SyncRunner {
         lastStatus: "failed",
         errorKind: error instanceof RemoteError ? error.kind : "unknown",
       });
+      this.#retryLater();
+    }
+  }
+
+  // 前面にいる間は、つながるのを待って送り直す(裏では前面に戻ったときに送る)
+  #retryLater(): void {
+    if (this.#foreground && RETRYABLE_ERRORS.includes(this.#status.errorKind) && this.#deps.pendingCount() > 0) {
+      this.#schedule(RETRY_SYNC_DELAY_MS);
     }
   }
 
@@ -141,7 +157,9 @@ export class SyncRunner {
     this.#clearTimer();
     this.#timer = setTimeout(() => {
       this.#timer = null;
-      void this.syncNow();
+      // 走っている同期に相乗りすると、その後に足された分が送られない。終わるのを待つ
+      if (this.#running) this.#schedule(delayMs);
+      else void this.syncNow();
     }, delayMs);
   }
 

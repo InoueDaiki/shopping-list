@@ -1,7 +1,7 @@
 import { RemoteError, type SyncResult } from "@shopping-list/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DEFERRED_SYNC_DELAY_MS, SHOPPING_SYNC_INTERVAL_MS, SyncRunner, WRITE_SYNC_DELAY_MS } from "./syncRunner.ts";
+import { DEFERRED_SYNC_DELAY_MS, RETRY_SYNC_DELAY_MS, SHOPPING_SYNC_INTERVAL_MS, SyncRunner, WRITE_SYNC_DELAY_MS } from "./syncRunner.ts";
 
 const OK: SyncResult = { status: "ok", pushed: 0, superseded: 0, pulled: true, pending: 0, issues: [], error: null };
 
@@ -61,6 +61,59 @@ describe("SyncRunner", () => {
     await vi.advanceTimersByTimeAsync(WRITE_SYNC_DELAY_MS - 1);
     runner.notifyWrite();
     await vi.advanceTimersByTimeAsync(WRITE_SYNC_DELAY_MS);
+    expect(sync).toHaveBeenCalledTimes(2);
+  });
+
+  it("同期の途中に書いたら、その同期が長引いても終わった後に送る", async () => {
+    runner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    let finish: (value: SyncResult) => void = () => undefined;
+    sync.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    void runner.syncNow();
+    pending = 1;
+    runner.notifyWrite();
+    await vi.advanceTimersByTimeAsync(WRITE_SYNC_DELAY_MS * 2);
+    // 走っている同期の結果にも、足された分が残りとして数えられている
+    finish({ ...OK, pending: 1 });
+    pending = 0;
+    await vi.advanceTimersByTimeAsync(WRITE_SYNC_DELAY_MS * 2);
+    expect(sync).toHaveBeenCalledTimes(3);
+  });
+
+  it("走っている同期に前面の復帰が重なっても、送信の予約を消さない", async () => {
+    runner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    let finish: (value: SyncResult) => void = () => undefined;
+    sync.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    void runner.syncNow();
+    runner.notifyWrite();
+    void runner.syncNow();
+    finish(OK);
+    await vi.advanceTimersByTimeAsync(WRITE_SYNC_DELAY_MS);
+    expect(sync).toHaveBeenCalledTimes(3);
+  });
+
+  it("つながらず未送信が残れば、前面にいる間は間を置いて試す", async () => {
+    pending = 1;
+    result = { ...OK, status: "failed", pulled: false, pending: 1, error: new RemoteError("offline", "つながらない") };
+    runner.start();
+    await vi.advanceTimersByTimeAsync(RETRY_SYNC_DELAY_MS);
+    expect(sync).toHaveBeenCalledTimes(2);
+    runner.setForeground(false);
+    await vi.advanceTimersByTimeAsync(RETRY_SYNC_DELAY_MS * 3);
+    expect(sync).toHaveBeenCalledTimes(3);
+  });
+
+  it("権限の失敗や未送信が無いときは試し直さない", async () => {
+    pending = 1;
+    result = { ...OK, status: "failed", pulled: false, pending: 1, error: new RemoteError("forbidden", "権限が無い") };
+    runner.start();
+    await vi.advanceTimersByTimeAsync(RETRY_SYNC_DELAY_MS * 2);
+    expect(sync).toHaveBeenCalledTimes(1);
+    pending = 0;
+    result = { ...result, pending: 0, error: new RemoteError("offline", "つながらない") };
+    await runner.syncNow();
+    await vi.advanceTimersByTimeAsync(RETRY_SYNC_DELAY_MS * 2);
     expect(sync).toHaveBeenCalledTimes(2);
   });
 
