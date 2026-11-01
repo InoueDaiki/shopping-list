@@ -1,0 +1,47 @@
+# lint・型検査、テスト。PR と main への push で毎回動かす。フォークの PR でも動くので Secrets は使わない
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # CI では .env がないので、mise.toml だけを信頼する
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+  # Java は Android のビルドにだけ使う
+  MISE_DISABLE_TOOLS: java
+
+jobs:
+  lint:
+    name: lint と型検査
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          mise-cache-prefix: mise-v1-lint
+      - run: mise run lint
+
+  test:
+    name: テスト
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          mise-cache-prefix: mise-v1-test
+      - run: mise run test

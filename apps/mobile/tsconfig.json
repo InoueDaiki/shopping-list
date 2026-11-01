@@ -1,0 +1,12 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    // 共有のパッケージは拡張子付き(.ts)で import する
+    "allowImportingTsExtensions": true
+  },
+  "include": ["app.config.ts", "src", ".expo/types/**/*.ts", "expo-env.d.ts"]
+}

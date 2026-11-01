@@ -1,0 +1,31 @@
+name: セットアップ
+description: mise.toml の版でツールを入れ、JS の依存関係を入れる
+
+inputs:
+  mise-cache-prefix:
+    description: mise のキャッシュのキーの接頭辞。ジョブごとに分ける
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      with:
+        version: 2026.10.4
+        cache_key_prefix: ${{ inputs.mise-cache-prefix }}
+
+    - name: pnpm のストアの場所
+      id: pnpm
+      shell: bash
+      run: echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - name: pnpm のキャッシュ
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pnpm.outputs.store }}
+        key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: JS の依存関係
+      shell: bash
+      run: pnpm install --frozen-lockfile

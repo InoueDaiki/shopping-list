@@ -1,0 +1,15 @@
+{
+  "name": "@shopping-list/design-tokens",
+  "version": "0.1.0",
+  "private": true,
+  "description": "デザイントークン(色、角丸)",
+  "type": "module",
+  "exports": {
+    "./theme.native.css": "./generated/theme.native.css",
+    "./native": "./generated/native.ts",
+    "./tokens": "./src/tokens.ts",
+    "./color": "./src/color.ts"
+  },
+  "scripts": { "gen": "node scripts/gen.ts", "typecheck": "tsc --noEmit", "test": "vitest run --passWithNoTests" },
+  "devDependencies": { "@types/node": "^24.19.1", "typescript": "^7.0.2", "vitest": "5.0.3" }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@shopping-list/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "画面を持たない処理(カテゴリの決定、順番の学習、同期)。DOM にも React Native にも依らない",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run --passWithNoTests" },
+  "devDependencies": { "typescript": "^7.0.2", "vitest": "5.0.3" }
+}

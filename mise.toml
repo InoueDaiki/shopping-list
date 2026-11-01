@@ -1,0 +1,35 @@
+# ツールの版とタスク。ホストと CI の両方でこのファイルを使う。
+
+[tools]
+node = "24.21.0"
+pnpm = "12.10.1"
+# Android のビルド(Gradle)。Android SDK は Android Studio が入れたものを使う
+java = { version = "temurin-17.0.14+7", os = ["macos"] }
+
+[env]
+_.file = { path = ".env", tools = false }
+
+[tasks.setup]
+description = "依存関係をインストールする"
+run = "pnpm install"
+
+[tasks.gen]
+description = "デザイントークンから Uniwind のテーマ・React Native の値・一覧を生成する"
+run = "node packages/design-tokens/scripts/gen.ts"
+
+[tasks.lint]
+description = "型検査(各パッケージの typecheck)とデザインの規則(oxlint)"
+run = ["pnpm -r typecheck", "pnpm lint:design"]
+
+[tasks.test]
+description = "テスト(test のスクリプトがあるパッケージで Vitest)"
+run = "pnpm -r --if-present test"
+
+[tasks.mobile]
+description = "モバイル版(apps/mobile)の Metro を起動する。ビルドは mobile:android"
+run = "pnpm --dir apps/mobile start"
+
+[tasks."mobile:android"]
+description = "モバイル版を Android 向けにビルドして入れる(エミュレーターか実機)"
+env = { ANDROID_HOME = "{{env.HOME}}/Library/Android/sdk" }
+run = "pnpm --dir apps/mobile exec expo run:android"

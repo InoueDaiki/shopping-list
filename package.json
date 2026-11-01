@@ -1,0 +1,12 @@
+{
+  "name": "shopping-list",
+  "private": true,
+  "packageManager": "pnpm@12.10.1",
+  "scripts": {
+    "lint:design": "oxlint"
+  },
+  "devDependencies": {
+    "eslint-plugin-better-tailwindcss": "4.9.1",
+    "oxlint": "1.88.0"
+  }
+}
