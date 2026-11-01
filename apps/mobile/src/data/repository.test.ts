@@ -56,6 +56,21 @@ describe("Repository", () => {
     expect(itemOf(item?.id ?? "")).toMatchObject({ categoryId: "b", categorySource: "user" });
   });
 
+  it("向きを先に切り替えても、最初のチェックで店舗を聞く", () => {
+    const [a, b] = [add("品物1"), add("品物2")];
+    repo.setDirection("desc");
+    expect(repo.checkItem(a?.id ?? "")).toBe(true);
+    // スキップしたら聞き直さない
+    expect(repo.checkItem(b?.id ?? "")).toBe(false);
+  });
+
+  it("sort が重なったカテゴリも動かせる", () => {
+    const row = (id: Id) => ({ id, name: id, sort: 1, updatedAt: new Date(clock).toISOString() });
+    store.commitNow([row("a"), row("b"), { ...row("c"), sort: 2 }].map((category) => ({ action: "put", table: "categories", row: category })));
+    repo.moveCategory("b", -1);
+    expect(store.rows("categories").map((category) => category.id)).toEqual(["b", "a", "c"]);
+  });
+
   it("最初のチェックだけ店舗を聞き、選ぶとチェックに店舗が付く", () => {
     const [a, b] = [add("品物1"), add("品物2")];
     expect(repo.checkItem(a?.id ?? "")).toBe(true);

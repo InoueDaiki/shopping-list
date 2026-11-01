@@ -120,11 +120,18 @@ export class Repository {
     if (!item || item.checked) return false;
     const now = this.#now();
     const current = this.currentSession();
+    // 向きの切り替えだけで始まった買い物は、まだ店舗を聞いていない。スキップの後は聞き直さない
+    const first = current === null || (current.storeId === null && !this.#hasChecks(current));
     const session = { ...(current ?? startSession(now)), touchedAt: now };
     const checked: Item = { ...item, checked: true, checkedAt: now, checkedStoreId: session.storeId, updatedAt: now };
     this.#store.commitNow([{ action: "put", table: "items", row: checked }]);
     this.#saveSession(reviewDirection(session, this.#orderForStore(session.storeId), this.#store.rows("items")));
-    return current === null;
+    return first;
+  }
+
+  #hasChecks(session: ShoppingSession): boolean {
+    const startedAt = Date.parse(session.startedAt);
+    return this.#store.rows("items").some((item) => item.checked && item.checkedAt !== null && Date.parse(item.checkedAt) >= startedAt);
   }
 
   // チェックを外す。そのチェックの記録も消える(学習に使わない)
@@ -240,12 +247,18 @@ export class Repository {
     const index = categories.findIndex((row) => row.id === id);
     const other = categories[index + offset];
     if (index < 0 || !other) return;
-    const current = categories[index];
+    const reordered = [...categories];
+    reordered[index] = other;
+    reordered[index + offset] = categories[index];
+    // 2台が同時に足すと sort が重なる。入れ替えても動かないので、そのときは振り直す
+    const sorts = categories.map((row) => row.sort);
+    const sortAt = (position: number) => (new Set(sorts).size === sorts.length ? sorts[position] : position + 1);
     const updatedAt = this.#now();
-    this.#store.commitNow([
-      { action: "put", table: "categories", row: { ...current, sort: other.sort, updatedAt } },
-      { action: "put", table: "categories", row: { ...other, sort: current.sort, updatedAt } },
-    ]);
+    this.#store.commitNow(
+      reordered.flatMap((row, position): LocalChange[] =>
+        row.sort === sortAt(position) ? [] : [{ action: "put", table: "categories", row: { ...row, sort: sortAt(position), updatedAt } }],
+      ),
+    );
   }
 
   // 品目は未分類に戻す(シートのプルダウンの参照先が無くならないように)
