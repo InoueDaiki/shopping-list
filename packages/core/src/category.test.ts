@@ -66,6 +66,32 @@ describe("resolveCategory", () => {
     expect((await resolveCategory({ ...base, items, history })).categoryId).toBe("cat-meat");
   });
 
+  it("履歴へ移った利用者の修正は、新しい履歴より強い", async () => {
+    const history = [
+      historyFixture({ id: "h1", categoryId: "cat-fish", categorySource: "user" }),
+      historyFixture({
+        id: "h2",
+        categoryId: "cat-meat",
+        categorySource: "history",
+        checkedAt: "2029-01-01T00:00:00.000Z",
+      }),
+    ];
+    expect((await resolveCategory({ ...base, history })).categoryId).toBe("cat-fish");
+  });
+
+  it("履歴へ移った推定は、古い履歴より弱い", async () => {
+    const history = [
+      historyFixture({ id: "h1", categoryId: "cat-meat", categorySource: "history" }),
+      historyFixture({
+        id: "h2",
+        categoryId: "cat-fish",
+        categorySource: "inferred",
+        checkedAt: "2029-01-01T00:00:00.000Z",
+      }),
+    ];
+    expect((await resolveCategory({ ...base, history })).categoryId).toBe("cat-meat");
+  });
+
   it("未分類の記録とマスタに無いカテゴリの記録は使わない", async () => {
     const history = [
       historyFixture({ id: "h1", categoryId: null }),

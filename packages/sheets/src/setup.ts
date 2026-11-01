@@ -37,8 +37,11 @@ const CATEGORY_NAMES: readonly (readonly [string, string])[] = [
   ["medicine", "医薬品"],
 ];
 
+// 初期のカテゴリの版。どの編集よりも古い固定の値にする
+const SEED_AT = "2000-01-01T00:00:00.000Z";
+
 export const INITIAL_CATEGORIES: readonly Category[] = CATEGORY_NAMES.map(
-  ([key, name], index) => ({ id: `cat_${key}`, name, sort: index + 1 }),
+  ([key, name], index) => ({ id: `cat_${key}`, name, sort: index + 1, updatedAt: SEED_AT }),
 );
 
 const TEXT_KINDS: ReadonlySet<Column["kind"]> = new Set([

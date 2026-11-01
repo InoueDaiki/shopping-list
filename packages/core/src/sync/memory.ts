@@ -1,7 +1,7 @@
 // テスト用のインメモリの実装。LocalStore の約束の見本も兼ねる。
 
-import type { Id } from "../types.ts";
-import { changeKey, rowId, rowVersion } from "./rows.ts";
+import type { Id, Iso } from "../types.ts";
+import { changeKey, isTombstoned, newestVersion, rowId, rowVersion } from "./rows.ts";
 import {
   RemoteError,
   type HistoryCursor,
@@ -94,7 +94,7 @@ export class MemoryLocalStore implements LocalStore {
 
 type RemoteRows = { [T in SyncTable]: TableRows[T][] };
 
-// 配列の添字 + 1 を行の位置とする。行を消すと後ろがずれるのはシートと同じ
+// 配列の添字 + 1 を行の位置とする。墓石はシートの deleted_at の列の代わりに別に持つ
 export class MemoryRemoteStore implements RemoteStore {
   readonly rows: RemoteRows = {
     lists: [],
@@ -104,14 +104,34 @@ export class MemoryRemoteStore implements RemoteStore {
     storeOrders: [],
     history: [],
   };
+  // 表ごとの、行の位置から墓石の時刻へ
+  readonly deletedAt: Record<MutableTable, Map<number, Iso>> = {
+    lists: new Map(),
+    categories: new Map(),
+    stores: new Map(),
+    items: new Map(),
+    storeOrders: new Map(),
+  };
   readonly calls = { locate: 0, write: 0, pull: 0 };
   readonly issues: RowIssue[] = [];
   offline = false;
   // 次の pull の直後、結果を返す前に呼ぶ。同期の途中の画面の操作を再現する
   afterPull: (() => Promise<void>) | null = null;
+  // 次の locate の直後、結果を返す前に呼ぶ。読んでから書くまでの間の、別の端末の書き込みを再現する
+  afterLocate: (() => Promise<void>) | null = null;
+  // true を返す書き込みが混ざると、全体を拒否する。入力規則の違反を再現する
+  rejects: ((write: RemoteWrite) => boolean) | null = null;
 
   #assertOnline(): void {
     if (this.offline) throw new RemoteError("offline", "つながらない");
+  }
+
+  #liveRows<T extends MutableTable>(table: T): TableRows[T][] {
+    const rows = this.rows[table] as TableRows[T][];
+    return rows.filter((row, i) => {
+      const deletedAt = this.deletedAt[table].get(i + 1) ?? null;
+      return !isTombstoned(rowVersion({ table, row } as RowOf), deletedAt);
+    });
   }
 
   async locate(tables: MutableTable[]): Promise<RemoteIndex> {
@@ -122,35 +142,56 @@ export class MemoryRemoteStore implements RemoteStore {
       index[table] = (this.rows[table] as TableRows[MutableTable][]).map(
         (row, i): RemoteRowRef => {
           const change = { table, row } as RowOf;
-          return { id: rowId(change), rowNumber: i + 1, version: rowVersion(change) };
+          const deletedAt = this.deletedAt[table].get(i + 1) ?? null;
+          return {
+            id: rowId(change),
+            rowNumber: i + 1,
+            version: newestVersion(rowVersion(change), deletedAt),
+          };
         },
       );
     }
+    const afterLocate = this.afterLocate;
+    this.afterLocate = null;
+    await afterLocate?.();
     return index;
   }
 
   async write(writes: RemoteWrite[]): Promise<void> {
     this.calls.write += 1;
     this.#assertOnline();
+    if (writes.some((write) => this.rejects?.(write))) {
+      throw new RemoteError("invalid", "入力規則の違反");
+    }
     for (const write of writes) {
+      if (write.kind === "tombstone") {
+        this.deletedAt[write.table].set(write.rowNumber, write.at);
+        continue;
+      }
       const rows = this.rows[write.table] as unknown[];
-      if (write.kind === "insert") rows.push(write.row);
-      else if (write.kind === "update") rows[write.rowNumber - 1] = write.row;
-      else rows.splice(write.rowNumber - 1, 1);
+      if (write.kind === "insert") {
+        rows.push(write.row);
+      } else {
+        rows[write.rowNumber - 1] = write.row;
+        // 行全体を書くので、deleted_at も空になる
+        if (write.table !== "history") {
+          this.deletedAt[write.table].delete(write.rowNumber);
+        }
+      }
     }
   }
 
   async pull(cursor: HistoryCursor | null): Promise<RemoteSnapshot> {
     this.calls.pull += 1;
     this.#assertOnline();
-    const { lists, categories, stores, items, storeOrders, history } = this.rows;
+    const { history } = this.rows;
     const snapshot: RemoteSnapshot = {
       tables: {
-        lists: [...lists],
-        categories: [...categories],
-        stores: [...stores],
-        items: [...items],
-        storeOrders: [...storeOrders],
+        lists: this.#liveRows("lists"),
+        categories: this.#liveRows("categories"),
+        stores: this.#liveRows("stores"),
+        items: this.#liveRows("items"),
+        storeOrders: this.#liveRows("storeOrders"),
       },
       history: history.slice(cursor?.position ?? 0),
       historyCursor: { position: history.length, lastId: history.at(-1)?.id ?? null },

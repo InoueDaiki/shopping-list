@@ -51,6 +51,8 @@ export class FakeSheets {
   readonly calls: { method: string; url: string }[] = [];
   // 次の要求で返す状態。テストが積む
   readonly failures: FetchResponse[] = [];
+  // true を返す要求が混ざると、batchUpdate の全体を 400 で拒否する。何も反映しない
+  rejects: ((request: Record<string, unknown>) => boolean) | null = null;
   spreadsheetId = "fakeSpreadsheetId0123456789";
 
   sheet(title: string): FakeSheet {
@@ -83,6 +85,9 @@ export class FakeSheets {
       const { requests } = JSON.parse(init.body ?? "{}") as {
         requests: Record<string, never>[];
       };
+      if (requests.some((request) => this.rejects?.(request))) {
+        return respond(400, { error: { message: "入力規則の違反" } });
+      }
       for (const request of requests) this.#apply(request);
       return respond(200, { replies: [] });
     }
@@ -143,24 +148,19 @@ export class FakeSheets {
         break;
       }
       case "updateCells": {
-        const start = body.start as unknown as { sheetId: number; rowIndex: number };
+        const start = body.start as unknown as {
+          sheetId: number;
+          rowIndex: number;
+          columnIndex: number;
+        };
         const { grid } = this.#byId(start.sheetId);
         const rows = rowsOf(body.rows as unknown as { values: CellData[] }[]);
+        // 渡したセルだけが変わり、右のセルは残る
         rows.forEach((row, i) => {
-          grid[start.rowIndex + i] = row;
+          const target = (grid[start.rowIndex + i] ??= []);
+          while (target.length < start.columnIndex) target.push(null);
+          target.splice(start.columnIndex, row.length, ...row);
         });
-        break;
-      }
-      case "deleteDimension": {
-        const range = body.range as unknown as {
-          sheetId: number;
-          startIndex: number;
-          endIndex: number;
-        };
-        this.#byId(range.sheetId).grid.splice(
-          range.startIndex,
-          range.endIndex - range.startIndex,
-        );
         break;
       }
       default:
