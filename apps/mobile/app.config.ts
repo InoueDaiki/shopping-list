@@ -1,11 +1,12 @@
-// Expo の設定。GOOGLE_OAUTH_CLIENT_ID は .env から読む(mise が読み込む)
+// Expo の設定。GOOGLE_OAUTH_CLIENT_ID は .env から読む(mise が読み込む)。
+// APP_VERSION と ANDROID_VERSION_CODE は Release のワークフローが渡す
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "買い物リスト",
   slug: "shopping-list",
-  version: "0.1.0",
+  version: process.env.APP_VERSION ?? "0.1.0",
   // 2つ目は Google の OAuth の戻り先(Android クライアントの慣習。パッケージ名の逆ドメイン)
   scheme: ["shoppinglist", "io.github.inouedaiki.shoppinglist"],
   orientation: "portrait",
@@ -13,8 +14,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   userInterfaceStyle: "automatic",
   android: {
     package: "io.github.inouedaiki.shoppinglist",
-    // 配布のたびに増やす。端末は小さい値では上書きしない
-    versionCode: 1,
+    // 端末は小さい値では上書きしない
+    versionCode: Number(process.env.ANDROID_VERSION_CODE ?? 1),
     permissions: ["android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION"],
     // テンプレートが入れるが使わない権限。バイブレーションを使うときは VIBRATE を外す
     blockedPermissions: [

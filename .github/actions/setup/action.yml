@@ -5,6 +5,9 @@ inputs:
   mise-cache-prefix:
     description: mise のキャッシュのキーの接頭辞。ジョブごとに分ける
     required: true
+  cache:
+    description: false なら mise と pnpm のキャッシュを使わない(配布物を作るとき)
+    default: "true"
 
 runs:
   using: composite
@@ -12,14 +15,17 @@ runs:
     - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
       with:
         version: 2026.10.4
+        cache: ${{ inputs.cache }}
         cache_key_prefix: ${{ inputs.mise-cache-prefix }}
 
     - name: pnpm のストアの場所
+      if: inputs.cache == 'true'
       id: pnpm
       shell: bash
       run: echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
     - name: pnpm のキャッシュ
+      if: inputs.cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.pnpm.outputs.store }}

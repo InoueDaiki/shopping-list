@@ -67,7 +67,7 @@ E2E はアプリのデータを消すので、エミュレーターでしか動�
 
 ## CI(GitHub Actions)
 
-ツールは mise で `mise.toml` と同じ版を入れ、ジョブの中身は上の `mise run` のタスクとそろえてある。リポジトリは公開で、フォークの PR でも動くので Secrets は使わない。
+ツールは mise で `mise.toml` と同じ版を入れ、ジョブの中身は上の `mise run` のタスクとそろえてある。リポジトリは公開で、フォークの PR でも動くので、`release.yml` のほかは Secrets を使わない。
 
 | ワークフロー | 動くとき | 内容 |
 | --- | --- | --- |
@@ -75,62 +75,57 @@ E2E はアプリのデータを消すので、エミュレーターでしか動�
 | `gen.yml` | PR と main への push | 生成物が古ければ落とす |
 | `android.yml` | main への push | `mise run build:android`。開発用の鍵で署名し、成果物は残さず成功だけを見る |
 | `e2e.yml` | main への push | x86_64 のデモの APK(`E2E_ABI`)を作り、エミュレーターで `mise run e2e:test` |
+| `release.yml` | `v1.2.3` のタグの push、手動の実行 | 署名済みの APK を作り、Actions の artifact に置く(下の「配布」) |
 
 ## 配布
 
-ストアは使わず、署名したリリースの APK を2台に直接入れる。大きさの実測は設計メモの「配布」。
+ストアは使わず、署名済みの APK を GitHub Actions の artifact からスマートフォンで受け取って入れる。大きさの実測は設計メモの「配布」。
 
-### ビルドする
+| きっかけ | 版 | 置き場所 |
+| --- | --- | --- |
+| `v1.2.3` のタグを push | `1.2.3` | Actions の artifact |
+| Release のワークフローを手動で実行 | `0.0.0-dev.<実行番号>` | Actions の artifact |
+| 手元の `mise run build:android` | `0.1.0` | `apps/mobile/android/app/build/outputs/apk/release/app-release.apk` |
 
-```sh
-mise run build:android
-```
+`versionCode` は Release のワークフローの実行番号を使う。ワークフローのファイル名を変えると番号が振り直されるので変えない。手元のビルドの `versionCode` は 1 なので、Actions の版の上には入らない。
 
-毎回 `android/` を作り直してビルドし、`apps/mobile/android/app/build/outputs/apk/release/app-release.apk` に置く。署名は `.env` で決まる。
+APK は実行ごとに、zip せず `shopping-list-<版>-arm64.apk` として置く。保持は 90 日で、過ぎると消える。リポジトリが公開なので、GitHub にログインしている人なら取得できる。APK にはクライアント ID が入るが、秘密の値は入らない。
 
-| 環境変数 | 内容 |
-| --- | --- |
-| `ANDROID_KEYSTORE_PATH` | 鍵のファイルの絶対パス。空なら開発用の鍵で署名する |
-| `ANDROID_KEYSTORE_PASSWORD` | 鍵のファイルのパスワード |
-| `ANDROID_KEY_ALIAS` | 鍵の別名 |
-| `ANDROID_KEY_PASSWORD` | 鍵のパスワード |
+スマートフォンでは次の手順で受け取る。
 
-`ANDROID_KEYSTORE_PATH` があるのに、ほかが足りなければビルドを止める。開発用の鍵はテンプレートに入っている公開の鍵なので、配布には使わない。
-
-配布のたびに `apps/mobile/app.config.ts` の `android.versionCode` を増やし、USB でつないだ端末に `adb install -r` で入れるか、APK を端末に送って開く。
+1. ブラウザで GitHub にログインする
+2. リポジトリの Actions から Release のワークフローを開き、成功した実行を選ぶ
+3. ページの Artifacts にある APK を押してダウンロードし、開いてインストールする(初回は、ブラウザに提供元不明のアプリの許可が要る)
 
 ### 配布用の鍵を作る
 
-最初に1回だけ作る。リポジトリの外に置く(`*.jks` と `*.keystore` は `.gitignore` にあるが、公開のリポジトリなので中に置かない)。Android の APK に入る証明書の名前には実名を入れなくてよい。
+最初に1回だけ手元で実行する。
 
 ```sh
-mkdir -p ~/.config/shopping-list
-mise exec -- keytool -genkeypair -v \
-  -storetype PKCS12 \
-  -keystore ~/.config/shopping-list/release.jks \
-  -alias shopping-list \
-  -keyalg RSA -keysize 2048 -validity 36500 \
-  -dname "CN=shopping-list"
+scripts/setup-release-key.sh
 ```
 
-パスワードを聞かれる。PKCS12 では鍵のファイルと鍵のパスワードが同じになるので、`.env` の2つに同じ値を書く。
+鍵を `~/.config/shopping-list/release.jks` に作り、`.env` と GitHub の Secrets に入れる。最後に SHA-1 を表示する。鍵があれば止まる。
 
-```sh
-ANDROID_KEYSTORE_PATH=/Users/<ユーザー名>/.config/shopping-list/release.jks
-ANDROID_KEYSTORE_PASSWORD=<作ったパスワード>
-ANDROID_KEY_ALIAS=shopping-list
-ANDROID_KEY_PASSWORD=<作ったパスワード>
-```
+| Secret | 内容 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | 鍵のファイルを base64 にしたもの |
+| `ANDROID_KEYSTORE_PASSWORD` | 鍵のファイルのパスワード |
+| `ANDROID_KEY_ALIAS` | 鍵の別名 |
+| `ANDROID_KEY_PASSWORD` | 鍵のパスワード |
+| `GOOGLE_OAUTH_CLIENT_ID` | OAuth クライアントの ID |
+
+`.env` の同じ名前の値で、手元のビルドも同じ鍵で署名する。
 
 ### 鍵の保管
 
-- **失くすと更新できない。** 別の鍵で署名した APK は上書きで入らず、アンインストールすると端末の中の送信待ちも消える。SHA-1 も変わるので、OAuth クライアントも作り直しになる。
-- 鍵のファイルとパスワードをパスワードマネージャーに保管し、手元のファイルが消えても戻せるようにする。
-- リポジトリ、GitHub の Secrets、チャットに置かない。CI は開発用の鍵でビルドするので、配布用の鍵を渡さない。
+- **失くすと更新できない。** 別の鍵で署名した APK は上書きで入らず、アンインストールすると端末の中の送信待ちも消える。SHA-1 も変わるので、OAuth クライアントも直すことになる。
+- Secrets の値は読み出せない。鍵のファイルと `.env` のパスワードをパスワードマネージャーにも保管する。
+- リポジトリとチャットに置かない。
 
 ### SHA-1 の確認と OAuth クライアントへの登録
 
-Android の OAuth クライアントは、パッケージ名と SHA-1 の組で1つなので、鍵ごとに作る。開発用の鍵のクライアントと配布用の鍵のクライアントを分け、ビルドする方の ID を `.env` の `GOOGLE_OAUTH_CLIENT_ID` に書く。
+Android の OAuth クライアントには、配布用の鍵の SHA-1 を入れる。開発用の鍵でビルドしたアプリも試すなら、クライアントを別に作り、ビルドする方の ID を `.env` の `GOOGLE_OAUTH_CLIENT_ID` に書く。
 
 ```sh
 # 配布用の鍵
