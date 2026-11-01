@@ -1,7 +1,11 @@
 import type { Id, Item } from "@shopping-list/core";
 import { Badge, Button, cx, FullScreenMessage, Icon, Text } from "@shopping-list/ui-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { ArrowDownNarrowWide, ArrowUpNarrowWide, ChevronRight, MapPin, Plus } from "lucide-react-native";
+import ArrowDownNarrowWide from "lucide-react-native/icons/arrow-down-narrow-wide";
+import ArrowUpNarrowWide from "lucide-react-native/icons/arrow-up-narrow-wide";
+import ChevronRight from "lucide-react-native/icons/chevron-right";
+import MapPin from "lucide-react-native/icons/map-pin";
+import Plus from "lucide-react-native/icons/plus";
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, Pressable, View } from "react-native";
 

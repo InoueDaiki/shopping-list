@@ -1,6 +1,6 @@
 import { cx, Icon, PageHeader, Text } from "@shopping-list/ui-native";
 import { router } from "expo-router";
-import { ChevronRight } from "lucide-react-native";
+import ChevronRight from "lucide-react-native/icons/chevron-right";
 import { Pressable, View } from "react-native";
 
 import { Page } from "../../../../components/Page.tsx";

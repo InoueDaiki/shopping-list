@@ -1,6 +1,9 @@
 import type { Category } from "@shopping-list/core";
 import { ActionSheet, Badge, Button, ConfirmDialog, cx, Icon, PageHeader } from "@shopping-list/ui-native";
-import { ArrowDown, ArrowUp, EllipsisVertical, Plus } from "lucide-react-native";
+import ArrowDown from "lucide-react-native/icons/arrow-down";
+import ArrowUp from "lucide-react-native/icons/arrow-up";
+import EllipsisVertical from "lucide-react-native/icons/ellipsis-vertical";
+import Plus from "lucide-react-native/icons/plus";
 import { useMemo, useState } from "react";
 import { View } from "react-native";
 

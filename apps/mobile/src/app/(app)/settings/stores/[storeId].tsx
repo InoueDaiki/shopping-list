@@ -1,7 +1,8 @@
 import type { Id } from "@shopping-list/core";
 import { Button, ConfirmDialog, cx, Field, FullScreenMessage, Icon, Input, PageHeader, Text } from "@shopping-list/ui-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { ArrowDown, ArrowUp } from "lucide-react-native";
+import ArrowDown from "lucide-react-native/icons/arrow-down";
+import ArrowUp from "lucide-react-native/icons/arrow-up";
 import { useMemo, useState } from "react";
 import { View } from "react-native";
 

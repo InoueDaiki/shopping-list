@@ -1,6 +1,7 @@
 import type { Id, Item } from "@shopping-list/core";
 import { Button, Checkbox, Icon } from "@shopping-list/ui-native";
-import { Pencil, StickyNote } from "lucide-react-native";
+import Pencil from "lucide-react-native/icons/pencil";
+import StickyNote from "lucide-react-native/icons/sticky-note";
 import { memo } from "react";
 import { View } from "react-native";
 

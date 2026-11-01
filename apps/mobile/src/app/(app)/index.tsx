@@ -1,7 +1,9 @@
 import type { ShoppingList } from "@shopping-list/core";
 import { ActionSheet, Badge, Button, ConfirmDialog, cx, Icon, PageHeader, Text } from "@shopping-list/ui-native";
 import { router } from "expo-router";
-import { EllipsisVertical, Plus, Settings } from "lucide-react-native";
+import EllipsisVertical from "lucide-react-native/icons/ellipsis-vertical";
+import Plus from "lucide-react-native/icons/plus";
+import Settings from "lucide-react-native/icons/settings";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
