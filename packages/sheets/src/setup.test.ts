@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { INITIAL_CATEGORIES, buildSetupRequests } from "./setup.ts";
-import { SHEETS, TABLE_SHEETS } from "./schema.ts";
+import { SCHEMA_VERSION, SHEETS, TABLE_SHEETS } from "./schema.ts";
 import { parseSpreadsheetId } from "./spreadsheetId.ts";
 
 type Req = Record<string, Record<string, any>>;
@@ -39,6 +39,7 @@ describe("buildSetupRequests", () => {
       "checked_at",
       "checked_store_id",
       "updated_at",
+      "deleted_at",
     ]);
   });
 
@@ -69,6 +70,17 @@ describe("buildSetupRequests", () => {
     ).toContain("REGEXMATCH(TO_TEXT(J2)");
   });
 
+  it("行を持つ表は、History を除いて deleted_at を持つ", () => {
+    const names = SHEETS.filter((def) => def.columns.some((c) => c.name === "deleted_at"));
+    expect(names.map((def) => def.name)).toEqual([
+      "Lists",
+      "Categories",
+      "Stores",
+      "Items",
+      "StoreOrders",
+    ]);
+  });
+
   it("すべてのシートに warningOnly の保護を付ける", () => {
     const protections = of("addProtectedRange");
     expect(protections).toHaveLength(SHEETS.length);
@@ -79,7 +91,9 @@ describe("buildSetupRequests", () => {
     const [categories, meta] = of("appendCells");
     expect(categories?.rows).toHaveLength(INITIAL_CATEGORIES.length);
     expect(categories?.rows[0].values[1].userEnteredValue.stringValue).toBe("鮮魚");
-    expect(meta?.rows[0].values[0].userEnteredValue.numberValue).toBe(1);
+    expect(meta?.rows[0].values[0].userEnteredValue.numberValue).toBe(
+      SCHEMA_VERSION,
+    );
     expect(new Set(INITIAL_CATEGORIES.map((c) => c.id)).size).toBe(
       INITIAL_CATEGORIES.length,
     );

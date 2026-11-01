@@ -2,9 +2,9 @@
 import type { Category, HistoryEntry, Item, Store } from "./types.ts";
 
 export const categoriesFixture: Category[] = [
-  { id: "cat-fish", name: "鮮魚", sort: 1 },
-  { id: "cat-meat", name: "生肉", sort: 2 },
-  { id: "cat-dairy", name: "乳製品", sort: 3 },
+  { id: "cat-fish", name: "鮮魚", sort: 1, updatedAt: "2028-01-01T00:00:00.000Z" },
+  { id: "cat-meat", name: "生肉", sort: 2, updatedAt: "2028-01-01T00:00:00.000Z" },
+  { id: "cat-dairy", name: "乳製品", sort: 3, updatedAt: "2028-01-01T00:00:00.000Z" },
 ];
 
 export function itemFixture(overrides: Partial<Item> = {}): Item {
@@ -29,6 +29,7 @@ export function historyFixture(overrides: Partial<HistoryEntry> = {}): HistoryEn
     listId: "list-a",
     name: "たまご",
     categoryId: null,
+    categorySource: null,
     storeId: null,
     tripId: null,
     checkedAt: "2028-01-01T00:00:00.000Z",
@@ -44,6 +45,7 @@ export function storeFixture(overrides: Partial<Store> = {}): Store {
     lat: null,
     lng: null,
     createdAt: "2028-01-01T00:00:00.000Z",
+    updatedAt: "2028-01-01T00:00:00.000Z",
     ...overrides,
   };
 }

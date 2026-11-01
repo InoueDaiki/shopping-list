@@ -8,12 +8,14 @@ export interface ShoppingList {
   id: Id;
   name: string;
   sort: number;
+  updatedAt: Iso;
 }
 
 export interface Category {
   id: Id;
   name: string;
   sort: number;
+  updatedAt: Iso;
 }
 
 export interface Store {
@@ -23,6 +25,7 @@ export interface Store {
   lat: number | null;
   lng: number | null;
   createdAt: Iso;
+  updatedAt: Iso;
 }
 
 // history: 過去の品目から引いた。inferred: 推定した。user: 利用者が決めた
@@ -49,7 +52,10 @@ export interface HistoryEntry {
   listId: Id;
   name: string;
   categoryId: Id | null;
+  // 品目から写す。利用者の修正は履歴へ移っても強い記録のまま残る
+  categorySource: CategorySource | null;
   storeId: Id | null;
+  // tripIdOf で決める
   tripId: Id | null;
   checkedAt: Iso;
   // トリップの中のチェックの順

@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { SheetsClient, type FetchResponse } from "./client.ts";
 import { encodeRow } from "./codec.ts";
+import { SCHEMA_VERSION } from "./schema.ts";
 import { FakeSheets } from "./fakeSheets.ts";
 import { createSpreadsheet } from "./setup.ts";
 import { SheetsRemote, openSpreadsheet } from "./sheetsRemote.ts";
@@ -36,6 +37,7 @@ function history(id: string, seq = 1): HistoryEntry {
     listId: "list1",
     name: "牛乳",
     categoryId: null,
+    categorySource: null,
     storeId: null,
     tripId: null,
     checkedAt: T(0),
@@ -70,7 +72,7 @@ describe("SheetsRemote", () => {
       sleep: async () => {},
     });
     ({ spreadsheetId } = await createSpreadsheet(client, "買い物リスト"));
-    server.sheet("Lists").grid.push(["list1", "スーパー", 1]);
+    server.sheet("Lists").grid.push(["list1", "スーパー", 1, T(0)]);
     server.calls.length = 0;
   });
 
@@ -96,7 +98,7 @@ describe("SheetsRemote", () => {
   });
 
   it("新しいスキーマの版のシートでは同期しない", async () => {
-    server.sheet("Meta").grid[1] = [2];
+    server.sheet("Meta").grid[1] = [SCHEMA_VERSION + 1];
     const { engine } = device();
     const result = await engine.sync();
     expect(result.status).toBe("failed");
@@ -127,7 +129,7 @@ describe("SheetsRemote", () => {
     expect(server.sheet("Items").grid[1]?.[2]).toBe("=とうふ");
   });
 
-  it("ID で行を探して更新し、消すときは行を詰める", async () => {
+  it("ID で行を探して更新し、消しても行を詰めない", async () => {
     const a = device();
     await a.local.commit([
       putItem(item("i1", T(1))),
@@ -147,8 +149,102 @@ describe("SheetsRemote", () => {
     ]);
     await a.engine.sync();
 
-    expect(ids("Items")).toEqual(["i3", "i1", "i4"]);
+    expect(ids("Items")).toEqual(["i3", "i2", "i1", "i4"]);
     expect(server.sheet("Items").grid[1]?.[5]).toBe("更新");
+    expect(server.sheet("Items").grid[2]?.[10]).toBe(T(2));
+    // 行の中身は残す。deleted_at のセルだけを書く
+    expect(server.sheet("Items").grid[2]?.[2]).toBe("=とうふ");
+    expect([...a.local.rows.items.keys()].sort()).toEqual(["i1", "i3", "i4"]);
+  });
+
+  it("墓石の行は pull に出ず、もう1台からも消える", async () => {
+    const a = device();
+    const b = device();
+    await a.local.commit([putItem(item("i1", T(1)))]);
+    await a.engine.sync();
+    await b.engine.sync();
+
+    await a.local.commit([{ action: "delete", table: "items", id: "i1", at: T(2) }]);
+    await a.engine.sync();
+    await b.engine.sync();
+
+    expect(b.local.rows.items.has("i1")).toBe(false);
+    expect(server.count("deleteDimension")).toBe(0);
+  });
+
+  it("オフラインの古い編集は墓石に負け、新しい編集は deleted_at を空にして生き返る", async () => {
+    const a = device();
+    const b = device();
+    await a.local.commit([putItem(item("i1", T(1)))]);
+    await a.engine.sync();
+    await b.engine.sync();
+
+    await a.local.commit([{ action: "delete", table: "items", id: "i1", at: T(3) }]);
+    await a.engine.sync();
+    await b.local.commit([putItem(item("i1", T(2), "古い"))]);
+    await b.engine.sync();
+    expect(b.local.rows.items.has("i1")).toBe(false);
+    expect(server.sheet("Items").grid[1]?.[10]).toBe(T(3));
+
+    await b.local.commit([putItem(item("i1", T(4), "新しい"))]);
+    await b.engine.sync();
+    await a.engine.sync();
+    expect(a.local.rows.items.get("i1")?.memo).toBe("新しい");
+    expect(server.sheet("Items").grid[1]?.[10]).toBeNull();
+  });
+
+  it("墓石より updated_at が新しい行は生きている", async () => {
+    const row = encodeRow("items", item("i1", T(5)));
+    row[10] = T(3);
+    server.sheet("Items").grid.push(row);
+    const a = device();
+    await a.engine.sync();
+    expect(a.local.rows.items.has("i1")).toBe(true);
+  });
+
+  it("重なった行の新しいほうが墓石なら取り込まない", async () => {
+    const tombstone = encodeRow("items", item("i1", T(1)));
+    tombstone[10] = T(4);
+    server.sheet("Items").grid.push(encodeRow("items", item("i1", T(2))), tombstone);
+    const a = device();
+    await a.engine.sync();
+    expect(a.local.rows.items.has("i1")).toBe(false);
+  });
+
+  it("マスタの競合も updated_at の後勝ちで決まる", async () => {
+    const list = (name: string, at: string) => ({
+      action: "put" as const,
+      table: "lists" as const,
+      row: { id: "list1", name, sort: 1, updatedAt: at },
+    });
+    const a = device();
+    const b = device();
+    await a.local.commit([list("新しい", T(5))]);
+    await b.local.commit([list("古い", T(3))]);
+    await a.engine.sync();
+    await b.engine.sync();
+
+    expect(server.sheet("Lists").grid[1]?.[1]).toBe("新しい");
+    expect(b.local.rows.lists.get("list1")?.name).toBe("新しい");
+  });
+
+  it("400 で拒否されたら分けて送り、原因の1件を隔離する", async () => {
+    const a = device();
+    await a.engine.sync();
+    await a.local.commit([
+      putItem(item("i1", T(1))),
+      putItem(item("i2", T(1), "拒否")),
+      putItem(item("i3", T(1))),
+    ]);
+    server.rejects = (request) => JSON.stringify(request).includes("拒否");
+
+    const result = await a.engine.sync();
+
+    expect(result.status).toBe("ok");
+    expect(ids("Items").sort()).toEqual(["i1", "i3"]);
+    expect(result.issues).toMatchObject([{ table: "items", id: "i2" }]);
+    expect(result.pending).toBe(1);
+    expect(a.local.rows.items.has("i2")).toBe(true);
   });
 
   it("後勝ちで古い変更は書かれず、ローカルが新しい値になる", async () => {
@@ -166,7 +262,7 @@ describe("SheetsRemote", () => {
     expect(b.local.rows.items.get("i1")?.memo).toBe("新しい");
   });
 
-  it("同じ ID の行が重なったら、読むときは新しい行を取り、次の更新で1行に戻す", async () => {
+  it("同じ ID の行が重なったら、読むときも更新するときも新しい行を使い、行は消さない", async () => {
     const a = device();
     server.sheet("Items").grid.push(
       encodeRow("items", item("i1", T(1), "古い")),
@@ -177,14 +273,16 @@ describe("SheetsRemote", () => {
 
     await a.local.commit([putItem(item("i1", T(3), "最新"))]);
     await a.engine.sync();
-    expect(ids("Items")).toEqual(["i1"]);
-    expect(server.sheet("Items").grid[1]?.[5]).toBe("最新");
+    expect(ids("Items")).toEqual(["i1", "i1"]);
+    expect(server.sheet("Items").grid[2]?.[5]).toBe("最新");
+    await a.engine.sync();
+    expect(a.local.rows.items.get("i1")?.memo).toBe("最新");
   });
 
   it("不正な行は報告し、正しい行は取り込む", async () => {
     server.sheet("Items").grid.push(
       encodeRow("items", item("i1", T(1))),
-      ["i2", "list1", "", null, null, null, "はい", null, null, "昨日"],
+      ["i2", "list1", "", null, null, null, "はい", null, null, "昨日", null],
     );
     const a = device();
     const result = await a.engine.sync();
@@ -216,7 +314,7 @@ describe("SheetsRemote", () => {
 
       await a.local.commit([putHistory(history("h3"))]);
       await a.engine.sync();
-      expect(historyRange()).toBe("History!A3:H");
+      expect(historyRange()).toBe("History!A3:I");
       expect(await a.local.historyCursor()).toEqual({ position: 5, lastId: "h3" });
       expect(a.local.rows.history.size).toBe(3);
     });
@@ -248,7 +346,7 @@ describe("SheetsRemote", () => {
       const grid = server.sheet("History").grid;
       grid.push(
         encodeRow("history", history("h1")),
-        ["h2", "list1", "牛乳", null, null, null, "壊れた日時", 1],
+        ["h2", "list1", "牛乳", null, null, null, null, "壊れた日時", 1],
         encodeRow("history", history("h3")),
       );
 

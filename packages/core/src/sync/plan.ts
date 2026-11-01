@@ -1,9 +1,8 @@
 // 送信待ちを、リモートへの書き込みに変える。副作用の無い計算だけを置く。
 
 import type { Iso } from "../types.ts";
-import { changeId, changeKey, compareIso, rowVersion } from "./rows.ts";
+import { changeKey, compareIso, rowVersion } from "./rows.ts";
 import type {
-  MutableTable,
   PendingOp,
   RemoteIndex,
   RemoteRowRef,
@@ -29,18 +28,26 @@ function wins(local: Iso | null, remote: Iso | null): boolean {
   return compareIso(local, remote) > 0;
 }
 
+// 新しい順。読めない版は後ろに回す。同じ版は上の行を先にする(読むときの選び方と同じ)
 function newestFirst(a: RemoteRowRef, b: RemoteRowRef): number {
-  if (a.version !== null && b.version !== null) {
-    const order = compareIso(b.version, a.version);
-    if (order !== 0) return order;
+  if (a.version === null || b.version === null) {
+    if (a.version !== b.version) return a.version === null ? 1 : -1;
+    return a.rowNumber - b.rowNumber;
   }
-  return a.rowNumber - b.rowNumber;
+  return compareIso(b.version, a.version) || a.rowNumber - b.rowNumber;
+}
+
+// 1件の書き込みと、その元の操作
+export interface PushStep {
+  op: PendingOp;
+  write: RemoteWrite;
 }
 
 export interface PushPlan {
-  writes: RemoteWrite[];
-  written: number;
-  // 後勝ちで負けた操作の数。リモートの値は続く pull で取り込む
+  steps: PushStep[];
+  // 書かずに終わる操作(後勝ちで負けた、消す行が無い)
+  settled: PendingOp[];
+  // settled のうち後勝ちで負けた操作の数。リモートの値は続く pull で取り込む
   superseded: number;
 }
 
@@ -53,33 +60,34 @@ export function planPush(ops: PendingOp[], index: RemoteIndex): PushPlan {
     }
   }
 
-  const masterInserts: RemoteWrite[] = [];
-  const updates: RemoteWrite[] = [];
-  const otherInserts: RemoteWrite[] = [];
-  const deletes: { table: MutableTable; rowNumber: number }[] = [];
-  let written = 0;
+  const masterInserts: PushStep[] = [];
+  const updates: PushStep[] = [];
+  const otherInserts: PushStep[] = [];
+  const tombstones: PushStep[] = [];
+  const settled: PendingOp[] = [];
   let superseded = 0;
 
   for (const op of ops) {
     if (op.action === "put" && op.table === "history") {
-      otherInserts.push({ kind: "insert", table: op.table, row: op.row });
-      written += 1;
+      otherInserts.push({ op, write: { kind: "insert", table: op.table, row: op.row } });
       continue;
     }
-    const table = op.table as MutableTable;
-    const refs = [...(refsByKey.get(`${table}\0${changeId(op)}`) ?? [])].sort(newestFirst);
-    const [head, ...duplicates] = refs;
-    // 送り直しなどで同じ ID の行が重なっていたら、ここで1行に戻す
-    for (const ref of duplicates) {
-      deletes.push({ table, rowNumber: ref.rowNumber });
-    }
+    // 同じ ID の行が重なっていても、消さずに新しい1行だけを書く。読むときは新しい行を取る
+    const [head] = [...(refsByKey.get(changeKey(op)) ?? [])].sort(newestFirst);
 
     if (op.action === "delete") {
-      if (head === undefined) continue;
-      if (wins(op.at, head.version)) {
-        deletes.push({ table, rowNumber: head.rowNumber });
-        written += 1;
+      if (head === undefined) {
+        settled.push(op);
+      } else if (wins(op.at, head.version)) {
+        const write: RemoteWrite = {
+          kind: "tombstone",
+          table: op.table,
+          rowNumber: head.rowNumber,
+          at: op.at,
+        };
+        tombstones.push({ op, write });
       } else {
+        settled.push(op);
         superseded += 1;
       }
       continue;
@@ -87,26 +95,19 @@ export function planPush(ops: PendingOp[], index: RemoteIndex): PushPlan {
 
     if (head === undefined) {
       const write = { ...op, kind: "insert" } as RemoteWrite;
-      (MASTER_TABLES.includes(table) ? masterInserts : otherInserts).push(write);
-      written += 1;
+      (MASTER_TABLES.includes(op.table) ? masterInserts : otherInserts).push({ op, write });
     } else if (wins(rowVersion(op), head.version)) {
-      updates.push({ ...op, kind: "update", rowNumber: head.rowNumber } as RemoteWrite);
-      written += 1;
+      const write = { ...op, kind: "update", rowNumber: head.rowNumber } as RemoteWrite;
+      updates.push({ op, write });
     } else {
+      settled.push(op);
       superseded += 1;
     }
   }
 
-  // 行を消すと後ろの行がずれるので、最後に、後ろの行から消す
-  deletes.sort((a, b) => a.table.localeCompare(b.table) || b.rowNumber - a.rowNumber);
   return {
-    writes: [
-      ...masterInserts,
-      ...updates,
-      ...otherInserts,
-      ...deletes.map((d): RemoteWrite => ({ kind: "delete", ...d })),
-    ],
-    written,
+    steps: [...masterInserts, ...updates, ...otherInserts, ...tombstones],
+    settled,
     superseded,
   };
 }

@@ -1,5 +1,5 @@
 import { TRIP_GAP_MS } from "./constants.ts";
-import type { Id, Iso, Item } from "./types.ts";
+import type { HistoryEntry, Id, Iso, Item } from "./types.ts";
 
 // チェックの記録。HistoryEntry はこの形を満たす。Item は checksFromItems で写す
 export interface CheckRecord {
@@ -70,6 +70,35 @@ export function groupTrips<T extends CheckRecord>(checks: readonly T[]): Trip<T>
 // 最後のチェックから、まとめられる時間を過ぎていれば終わっている
 export function isTripFinished(trip: Trip, now: Iso): boolean {
   return Date.parse(now) - Date.parse(trip.endedAt) > TRIP_GAP_MS;
+}
+
+// トリップの ID。最初のチェックの ID をそのまま使うので、どの端末で計算しても同じになる
+export function tripIdOf(trip: Trip): Id {
+  return trip.checks[0].id;
+}
+
+// 終わったトリップの品目を履歴の行にする。履歴の ID は品目の ID にするので、2台が同じ
+// トリップを移しても重ならない(読むときに ID で重ねる)。items に無いチェックは除く
+export function historyEntriesFromTrip(trip: Trip, items: readonly Item[]): HistoryEntry[] {
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  const tripId = tripIdOf(trip);
+  return trip.checks.flatMap((check, checkedSeq) => {
+    const item = itemsById.get(check.id);
+    if (item === undefined) return [];
+    return [
+      {
+        id: item.id,
+        listId: item.listId,
+        name: item.name,
+        categoryId: item.categoryId,
+        categorySource: item.categorySource,
+        storeId: trip.storeId,
+        tripId,
+        checkedAt: check.checkedAt,
+        checkedSeq,
+      },
+    ];
+  });
 }
 
 // カテゴリごとの最初のチェックの順。未分類は順番に関わらないので除く
