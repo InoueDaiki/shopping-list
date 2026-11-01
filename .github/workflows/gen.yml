@@ -20,7 +20,7 @@ concurrency:
 
 env:
   MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-  MISE_DISABLE_TOOLS: java
+  MISE_DISABLE_TOOLS: java,maestro
 
 jobs:
   gen:

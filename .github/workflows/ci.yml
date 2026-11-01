@@ -16,8 +16,8 @@ concurrency:
 env:
   # CI では .env がないので、mise.toml だけを信頼する
   MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-  # Java は Android のビルドにだけ使う
-  MISE_DISABLE_TOOLS: java
+  # Java と Maestro は Android のビルドと E2E にだけ使う
+  MISE_DISABLE_TOOLS: java,maestro
 
 jobs:
   lint:

@@ -12,6 +12,8 @@ permissions:
 env:
   # CI では .env がないので、mise.toml だけを信頼する
   MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+  # Maestro は E2E にだけ使う
+  MISE_DISABLE_TOOLS: maestro
 
 jobs:
   build:
@@ -22,7 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # ci.yml と違い MISE_DISABLE_TOOLS を付けず、mise.toml の Java を入れる。Android SDK はランナーのものを使う
+      # ci.yml と違い mise.toml の Java を入れる。Android SDK はランナーのものを使う
       - uses: ./.github/actions/setup
         with:
           mise-cache-prefix: mise-v1-android

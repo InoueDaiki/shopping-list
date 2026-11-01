@@ -1,0 +1,14 @@
+# チェックの前に向きを切り替えても、最初のチェックで店舗を聞く
+appId: io.github.inouedaiki.shoppinglist
+---
+- launchApp:
+    clearState: true
+- tapOn: スーパー
+- tapOn: 昇順。降順に切り替える
+- assertVisible: 降順。昇順に切り替える
+- tapOn: 牛乳
+- assertVisible: どの店舗で買いますか
+- tapOn: スキップ
+- tapOn: 食パン
+- assertNotVisible: どの店舗で買いますか
+- assertVisible: チェック済み 2

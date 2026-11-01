@@ -28,3 +28,6 @@ apps/mobile/android/
 apps/mobile/ios/
 *.apk
 *.aab
+
+# E2E の結果
+e2e/output/
