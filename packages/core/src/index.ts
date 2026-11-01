@@ -8,3 +8,4 @@ export * from "./sort.ts";
 export * from "./stores.ts";
 export * from "./trips.ts";
 export * from "./types.ts";
+export * from "./sync/index.ts";

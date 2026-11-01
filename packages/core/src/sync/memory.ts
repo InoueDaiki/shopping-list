@@ -1,0 +1,162 @@
+// テスト用のインメモリの実装。LocalStore の約束の見本も兼ねる。
+
+import type { Id } from "../types.ts";
+import { changeKey, rowId, rowVersion } from "./rows.ts";
+import {
+  RemoteError,
+  type HistoryCursor,
+  type LocalChange,
+  type LocalStore,
+  type MutableTable,
+  type PendingOp,
+  type RemoteApply,
+  type RemoteIndex,
+  type RemoteRowRef,
+  type RemoteSnapshot,
+  type RemoteStore,
+  type RemoteWrite,
+  type RowIssue,
+  type RowOf,
+  type SyncTable,
+  type TableRows,
+} from "./types.ts";
+
+const MUTABLE_TABLES: readonly MutableTable[] = [
+  "lists",
+  "categories",
+  "stores",
+  "items",
+  "storeOrders",
+];
+
+type LocalRows = { [T in SyncTable]: Map<Id, TableRows[T]> };
+
+export class MemoryLocalStore implements LocalStore {
+  readonly rows: LocalRows = {
+    lists: new Map(),
+    categories: new Map(),
+    stores: new Map(),
+    items: new Map(),
+    storeOrders: new Map(),
+    history: new Map(),
+  };
+  #ops: PendingOp[] = [];
+  #seq = 0;
+  #cursor: HistoryCursor | null = null;
+
+  async commit(changes: LocalChange[]): Promise<void> {
+    for (const change of changes) {
+      this.#seq += 1;
+      if (change.action === "put") {
+        (this.rows[change.table] as Map<Id, unknown>).set(rowId(change), change.row);
+      } else {
+        this.rows[change.table].delete(change.id);
+      }
+      this.#ops.push({ ...change, seq: this.#seq });
+    }
+  }
+
+  async pendingOps(limit: number): Promise<PendingOp[]> {
+    return this.#ops.slice(0, limit);
+  }
+
+  async pendingCount(): Promise<number> {
+    return this.#ops.length;
+  }
+
+  async ackOps(seqs: number[]): Promise<void> {
+    const acked = new Set(seqs);
+    this.#ops = this.#ops.filter((op) => !acked.has(op.seq));
+  }
+
+  async historyCursor(): Promise<HistoryCursor | null> {
+    return this.#cursor;
+  }
+
+  async applyRemote(input: RemoteApply): Promise<void> {
+    const pending = new Set(this.#ops.map(changeKey));
+    for (const table of MUTABLE_TABLES) {
+      const target = this.rows[table] as Map<Id, unknown>;
+      const seen = new Set<Id>(input.keep[table] ?? []);
+      for (const row of input.tables[table]) {
+        const id = rowId({ table, row } as RowOf);
+        seen.add(id);
+        if (!pending.has(`${table}\0${id}`)) target.set(id, row);
+      }
+      for (const id of [...target.keys()]) {
+        if (!seen.has(id) && !pending.has(`${table}\0${id}`)) target.delete(id);
+      }
+    }
+    for (const entry of input.history) this.rows.history.set(entry.id, entry);
+    this.#cursor = input.historyCursor;
+  }
+}
+
+type RemoteRows = { [T in SyncTable]: TableRows[T][] };
+
+// 配列の添字 + 1 を行の位置とする。行を消すと後ろがずれるのはシートと同じ
+export class MemoryRemoteStore implements RemoteStore {
+  readonly rows: RemoteRows = {
+    lists: [],
+    categories: [],
+    stores: [],
+    items: [],
+    storeOrders: [],
+    history: [],
+  };
+  readonly calls = { locate: 0, write: 0, pull: 0 };
+  readonly issues: RowIssue[] = [];
+  offline = false;
+  // 次の pull の直後、結果を返す前に呼ぶ。同期の途中の画面の操作を再現する
+  afterPull: (() => Promise<void>) | null = null;
+
+  #assertOnline(): void {
+    if (this.offline) throw new RemoteError("offline", "つながらない");
+  }
+
+  async locate(tables: MutableTable[]): Promise<RemoteIndex> {
+    this.calls.locate += 1;
+    this.#assertOnline();
+    const index: RemoteIndex = {};
+    for (const table of tables) {
+      index[table] = (this.rows[table] as TableRows[MutableTable][]).map(
+        (row, i): RemoteRowRef => {
+          const change = { table, row } as RowOf;
+          return { id: rowId(change), rowNumber: i + 1, version: rowVersion(change) };
+        },
+      );
+    }
+    return index;
+  }
+
+  async write(writes: RemoteWrite[]): Promise<void> {
+    this.calls.write += 1;
+    this.#assertOnline();
+    for (const write of writes) {
+      const rows = this.rows[write.table] as unknown[];
+      if (write.kind === "insert") rows.push(write.row);
+      else if (write.kind === "update") rows[write.rowNumber - 1] = write.row;
+      else rows.splice(write.rowNumber - 1, 1);
+    }
+  }
+
+  async pull(cursor: HistoryCursor | null): Promise<RemoteSnapshot> {
+    this.calls.pull += 1;
+    this.#assertOnline();
+    const { lists, categories, stores, items, storeOrders, history } = this.rows;
+    const snapshot: RemoteSnapshot = {
+      tables: {
+        lists: [...lists],
+        categories: [...categories],
+        stores: [...stores],
+        items: [...items],
+        storeOrders: [...storeOrders],
+      },
+      history: history.slice(cursor?.position ?? 0),
+      historyCursor: { position: history.length, lastId: history.at(-1)?.id ?? null },
+      issues: [...this.issues],
+    };
+    await this.afterPull?.();
+    return snapshot;
+  }
+}
