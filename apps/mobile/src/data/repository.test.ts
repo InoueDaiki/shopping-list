@@ -1,4 +1,4 @@
-import { HOUR_MS, TRIP_GAP_MS, type Id } from "@shopping-list/core";
+import { HOUR_MS, MemoryLocalStore, MemoryRemoteStore, STORE_CORRECTION_MS, SyncEngine, TRIP_GAP_MS, type Id, type Item } from "@shopping-list/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { SqliteLocalStore } from "./localStore.ts";
@@ -9,11 +9,27 @@ const START = Date.parse("2028-01-01T00:00:00.000Z");
 const NONE = { categoryId: null, categorySource: null };
 const CATEGORIES: Id[] = ["a", "b", "c"];
 
+function itemRow(id: Id, listId: Id): Item {
+  return {
+    id,
+    listId,
+    name: "架空の品物",
+    categoryId: null,
+    categorySource: null,
+    memo: "",
+    checked: false,
+    checkedAt: null,
+    checkedStoreId: null,
+    checkedUpdatedAt: "",
+    updatedAt: "",
+  };
+}
+
 describe("Repository", () => {
   let store: SqliteLocalStore;
   let repo: Repository;
   let clock: number;
-  let order: readonly Id[];
+  let order: readonly Id[] | null;
   let next: number;
 
   beforeEach(() => {
@@ -25,7 +41,7 @@ describe("Repository", () => {
       store,
       newId: () => `id-${++next}`,
       now: () => new Date(clock).toISOString(),
-      orderForStore: () => order,
+      learnedOrder: () => order,
     });
   });
 
@@ -46,6 +62,54 @@ describe("Repository", () => {
     repo.deleteList(listId);
     expect(store.rows("lists")).toEqual([]);
     expect(store.rows("items")).toEqual([]);
+  });
+
+  it("リストを消すと品目も墓石の操作になり、同期の後にシートの品目が消える", async () => {
+    const remote = new MemoryRemoteStore();
+    const engine = new SyncEngine({ local: store, remote });
+    const listId = repo.addList("架空のリスト");
+    const item = repo.addItem(listId, "品物", NONE);
+    await engine.sync();
+    clock += 1000;
+
+    repo.deleteList(listId);
+    await engine.sync();
+
+    expect(remote.rows.items.map((row) => row.id)).toEqual([item?.id]);
+    expect(remote.deletedAt.items.size).toBe(1);
+    expect(remote.deletedAt.lists.size).toBe(1);
+  });
+
+  it("リストを消す前にほかの端末が足した品目も、次の同期で片付ける", async () => {
+    const remote = new MemoryRemoteStore();
+    const engine = new SyncEngine({ local: store, remote });
+    const other = new MemoryLocalStore();
+    const otherEngine = new SyncEngine({ local: other, remote });
+    const listId = repo.addList("架空のリスト");
+    await engine.sync();
+    await otherEngine.sync();
+    const at = new Date(clock).toISOString();
+    await other.commit([
+      {
+        action: "put",
+        table: "items",
+        row: { ...itemRow("late", listId), checkedUpdatedAt: at, updatedAt: at },
+      },
+    ]);
+    await otherEngine.sync();
+
+    // まだ読んでいない端末がリストを消す
+    clock += 1000;
+    repo.deleteList(listId);
+    await engine.sync();
+    expect(store.rows("items").map((row) => row.id)).toEqual(["late"]);
+
+    expect(repo.removeOrphanItems()).toBe(1);
+    await engine.sync();
+    await otherEngine.sync();
+
+    expect(remote.deletedAt.items.size).toBe(1);
+    expect(other.rows.items.size).toBe(0);
   });
 
   it("カテゴリを直すと user になり、名前だけなら元のまま", () => {
@@ -103,6 +167,119 @@ describe("Repository", () => {
     repo.selectStore(first);
     repo.selectStore(second);
     expect(itemOf(item?.id ?? "")?.checkedStoreId).toBe(second);
+  });
+
+  it("最後のチェックから5分以内は付け替える", () => {
+    const item = add("品物");
+    const [first, second] = [repo.addStore("店1", null), repo.addStore("店2", null)];
+    repo.selectStore(first);
+    repo.checkItem(item?.id ?? "");
+    clock += STORE_CORRECTION_MS;
+    repo.selectStore(second);
+    expect(itemOf(item?.id ?? "")?.checkedStoreId).toBe(second);
+    expect(repo.currentSession()?.storeId).toBe(second);
+  });
+
+  it("5分を超えたら、前のチェックはそのままで以後を新しいトリップにする", () => {
+    const [a, b] = [add("品物1"), add("品物2")];
+    const [first, second, third] = [repo.addStore("店1", null), repo.addStore("店2", null), repo.addStore("店3", null)];
+    repo.selectStore(first);
+    repo.checkItem(a?.id ?? "");
+    const before = itemOf(a?.id ?? "");
+    repo.setDirection("desc");
+    clock += STORE_CORRECTION_MS + 1;
+
+    repo.selectStore(second);
+    expect(itemOf(a?.id ?? "")).toBe(before);
+    expect(repo.currentSession()?.startedAt).toBe(new Date(clock).toISOString());
+    expect(repo.currentSession()?.direction.direction).toBe("asc");
+
+    clock += 1000;
+    expect(repo.checkItem(b?.id ?? "")).toBe(false);
+    expect(itemOf(b?.id ?? "")?.checkedStoreId).toBe(second);
+
+    // 新しいトリップの訂正は、前の店舗のチェックに触らない
+    clock += 1000;
+    repo.selectStore(third);
+    expect(itemOf(a?.id ?? "")?.checkedStoreId).toBe(first);
+    expect(itemOf(b?.id ?? "")?.checkedStoreId).toBe(third);
+  });
+
+  it("同じ店舗を選び直しても、トリップは切れない", () => {
+    const item = add("品物");
+    const storeId = repo.addStore("店1", null);
+    repo.selectStore(storeId);
+    repo.checkItem(item?.id ?? "");
+    const startedAt = repo.currentSession()?.startedAt;
+    clock += STORE_CORRECTION_MS + 1;
+    repo.selectStore(storeId);
+    expect(repo.currentSession()?.startedAt).toBe(startedAt);
+  });
+
+  it("チェックの変更は checkedUpdatedAt だけ、ほかの編集は updatedAt だけを進める", () => {
+    const item = add("品物", "a");
+    const id = item?.id ?? "";
+    const storeId = repo.addStore("店1", null);
+    const created = new Date(clock).toISOString();
+    clock += 1000;
+    repo.checkItem(id);
+    expect(itemOf(id)?.updatedAt).toBe(created);
+    expect(itemOf(id)?.checkedUpdatedAt).toBe(new Date(clock).toISOString());
+
+    const checkedAt = itemOf(id)?.checkedUpdatedAt;
+    clock += 1000;
+    repo.updateItem(id, { memo: "メモ" });
+    repo.deleteCategory("a");
+    expect(itemOf(id)?.checkedUpdatedAt).toBe(checkedAt);
+    expect(itemOf(id)?.updatedAt).toBe(new Date(clock).toISOString());
+
+    const updatedAt = itemOf(id)?.updatedAt;
+    clock += 1000;
+    repo.selectStore(storeId);
+    repo.deleteStore(storeId);
+    clock += 1000;
+    repo.uncheckItem(id);
+    expect(itemOf(id)?.updatedAt).toBe(updatedAt);
+    expect(itemOf(id)?.checkedUpdatedAt).toBe(new Date(clock).toISOString());
+  });
+
+  it("順番を学んでいない店舗では向きを自動で切り替えない", () => {
+    order = null;
+    const storeId = repo.addStore("架空の店", null);
+    repo.selectStore(storeId);
+    for (const categoryId of ["c", "b", "a"]) {
+      clock += 60_000;
+      repo.checkItem(add(`品物${categoryId}`, categoryId)?.id ?? "");
+    }
+    expect(repo.currentSession()?.direction).toMatchObject({ direction: "asc", autoSwitched: false });
+  });
+
+  it("同じ名前の店舗は新しく登録せず、既存を使う", () => {
+    const id = repo.addStore("マルサン", { lat: 1, lng: 2 });
+    expect(repo.addStore(" まるさん ", { lat: 3, lng: 4 })).toBe(id);
+    expect(store.rows("stores")).toHaveLength(1);
+    expect(store.rows("stores")[0]).toMatchObject({ name: "マルサン", lat: 1, lng: 2 });
+    expect(repo.findStore("まるさん")?.id).toBe(id);
+    expect(repo.addStore("別の店", null)).not.toBe(id);
+  });
+
+  it("リストの無い品目を墓石にする", () => {
+    const listId = repo.addList("架空のリスト");
+    const kept = repo.addItem(listId, "残る品物", NONE);
+    store.commitNow([
+      {
+        action: "put",
+        table: "items",
+        row: { ...(kept as NonNullable<typeof kept>), id: "orphan", listId: "deleted-list" },
+      },
+    ]);
+    const pending = store.pendingCountNow();
+
+    expect(repo.removeOrphanItems()).toBe(1);
+
+    expect(store.rows("items").map((row) => row.id)).toEqual([kept?.id]);
+    expect(store.pendingCountNow()).toBe(pending + 1);
+    expect(repo.removeOrphanItems()).toBe(0);
   });
 
   it("チェックを外すと記録も消える", () => {

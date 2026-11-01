@@ -10,6 +10,9 @@ export function rowId(change: RowOf): Id {
 // 後勝ちに使う版。History は書き換えないので版を持たない
 export function rowVersion(change: RowOf): Iso | null {
   if (change.table === "history") return null;
+  if (change.table === "items") {
+    return newestVersion(change.row.updatedAt, change.row.checkedUpdatedAt);
+  }
   return change.table === "storeOrders" ? change.row.editedAt : change.row.updatedAt;
 }
 

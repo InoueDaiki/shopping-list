@@ -54,6 +54,13 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `,
   },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE items ADD COLUMN checked_updated_at TEXT NOT NULL DEFAULT '';
+      UPDATE items SET checked_updated_at = updated_at;
+    `,
+  },
 ];
 
 export function migrate(db: Database): void {

@@ -80,6 +80,7 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
       "checked",
       "checked_at",
       "checked_store_id",
+      "checked_updated_at",
       "updated_at",
     ],
     orderBy: "rowid",
@@ -93,6 +94,7 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
       row.checked ? 1 : 0,
       row.checkedAt,
       row.checkedStoreId,
+      row.checkedUpdatedAt,
       row.updatedAt,
     ],
     decode: (row) => ({
@@ -105,6 +107,7 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
       checked: row.checked === 1,
       checkedAt: row.checked_at as string | null,
       checkedStoreId: row.checked_store_id as Id | null,
+      checkedUpdatedAt: row.checked_updated_at as string,
       updatedAt: row.updated_at as string,
     }),
   },
@@ -178,7 +181,7 @@ function reuseRows(table: SyncTable, rows: unknown[], previous: unknown[]): unkn
   });
 }
 
-export type StoreTopic = SyncTable | "pending" | "settings";
+export type StoreTopic = SyncTable | "pending" | "settings" | "writesLocked";
 
 const HISTORY_CURSOR_KEY = "historyCursor";
 
@@ -195,6 +198,7 @@ export class SqliteLocalStore implements LocalStore {
   readonly #staleRows = new Map<SyncTable, unknown[]>();
   #settings: Map<string, string> | null = null;
   #pendingCount: number | null = null;
+  #writesLocked = false;
   readonly #listeners = new Map<StoreTopic, Set<() => void>>();
 
   constructor(db: Database, options: SqliteLocalStoreOptions = {}) {
@@ -251,7 +255,7 @@ export class SqliteLocalStore implements LocalStore {
     for (const topic of list) {
       if (topic === "pending") this.#pendingCount = null;
       else if (topic === "settings") this.#settings = null;
-      else {
+      else if (topic !== "writesLocked") {
         const cached = this.#rows.get(topic);
         if (cached) this.#staleRows.set(topic, cached);
         this.#rows.delete(topic);
@@ -283,9 +287,24 @@ export class SqliteLocalStore implements LocalStore {
     return Promise.resolve();
   }
 
+  writesLocked = (): boolean => this.#writesLocked;
+
+  // task の間は書き込みを受け付けない(捨てる)。シートの切り替えの通信の間に足された変更が、
+  // 確かめられないまま写しと一緒に消えないようにする。画面は止める表示を出す
+  async whileWritesLocked<T>(task: () => Promise<T>): Promise<T> {
+    this.#writesLocked = true;
+    this.#notify(["writesLocked"]);
+    try {
+      return await task();
+    } finally {
+      this.#writesLocked = false;
+      this.#notify(["writesLocked"]);
+    }
+  }
+
   // 同期で書く。画面は await せず、次の描画から新しい値が見える
   commitNow(changes: LocalChange[]): void {
-    if (changes.length === 0) return;
+    if (changes.length === 0 || this.#writesLocked) return;
     this.#db.transaction(() => {
       for (const change of changes) {
         const def = tableDef(change.table);

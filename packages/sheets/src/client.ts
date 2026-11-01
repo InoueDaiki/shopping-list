@@ -26,7 +26,7 @@ export type GetAccessToken = (options: { forceRefresh: boolean }) => Promise<str
 export interface SheetsClientOptions {
   fetch: FetchLike;
   getAccessToken: GetAccessToken;
-  // 429 と 5xx の再試行の回数
+  // 408、425、429 と 5xx の再試行の回数
   maxRetries?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
@@ -54,7 +54,8 @@ export interface Spreadsheet {
 export type SheetsRequest = Record<string, unknown>;
 
 const BASE_URL = "https://sheets.googleapis.com/v4/spreadsheets";
-const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+// 408(要求の時間切れ)と 425(早すぎる)も一時的な失敗。中身の拒否ではないので隔離しない
+const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 const delay = (ms: number) =>
   new Promise<void>((resolve) => {
@@ -66,7 +67,7 @@ function errorKind(status: number): RemoteErrorKind {
   if (status === 403) return "forbidden";
   if (status === 404) return "notFound";
   if (status === 429) return "rateLimited";
-  if (status >= 500) return "server";
+  if (status >= 500 || status === 408 || status === 425) return "server";
   return "invalid";
 }
 

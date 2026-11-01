@@ -29,15 +29,13 @@ import type { Cell, SheetsClient, SheetsRequest, ValueRange } from "./client.ts"
 import { decodeRow, encodeChange, isId, isIso } from "./codec.ts";
 import {
   HISTORY_SHEET,
+  ITEM_CHECK_COLUMNS,
   META_SHEET,
-  SCHEMA_VERSION,
-  SHEETS,
   TABLE_SHEETS,
   columnIndex,
   dataRange,
-  headerRange,
-  type SheetName,
 } from "./schema.ts";
+import { assertSchemaVersion, surveySpreadsheet, type SheetIds } from "./setup.ts";
 import { parseSpreadsheetId } from "./spreadsheetId.ts";
 
 const FIRST_DATA_ROW = 2;
@@ -57,47 +55,27 @@ const TABLES: readonly MutableTable[] = [
   "storeOrders",
 ];
 
-type SheetIds = Record<SheetName, number>;
-
-function assertSchemaVersion(range: ValueRange | undefined): void {
-  const version = range?.values?.[0]?.[0];
-  if (version !== SCHEMA_VERSION) {
-    throw new RemoteError(
-      "schema",
-      `スキーマの版が合わない: シート ${String(version)}、アプリ ${SCHEMA_VERSION}`,
-    );
-  }
+// Items の更新で書く列の範囲([始まり, 終わり) の組)。part が無ければ行全体
+function updateSpans(write: RemoteWrite, length: number): [number, number][] {
+  if (write.kind !== "update" || write.part === undefined) return [[0, length]];
+  const def = TABLE_SHEETS.items;
+  const from = columnIndex(def, ITEM_CHECK_COLUMNS[0]);
+  const to = from + ITEM_CHECK_COLUMNS.length;
+  return write.part === "check"
+    ? [[from, to]]
+    : [
+        [0, from],
+        [to, length],
+      ];
 }
 
 // シートがそろい、見出しと版が合うことを確かめて、シートの番号を返す
 async function inspect(client: SheetsClient, spreadsheetId: string): Promise<SheetIds> {
-  const spreadsheet = await client.get(
-    spreadsheetId,
-    "spreadsheetId,sheets.properties(sheetId,title)",
-  );
-  const found = new Map(
-    (spreadsheet.sheets ?? []).map(({ properties }) => [
-      properties.title,
-      properties.sheetId,
-    ]),
-  );
-  const missing = SHEETS.filter((def) => !found.has(def.name)).map((def) => def.name);
+  const { missing, sheetIds } = await surveySpreadsheet(client, spreadsheetId);
   if (missing.length > 0) {
     throw new RemoteError("schema", `シートが足りない: ${missing.join("、")}`);
   }
-
-  const ranges = await client.batchGet(spreadsheetId, [
-    `${META_SHEET.name}!A2`,
-    ...SHEETS.map(headerRange),
-  ]);
-  assertSchemaVersion(ranges[0]);
-  SHEETS.forEach((def, index) => {
-    const header = ranges[index + 1]?.values?.[0] ?? [];
-    if (def.columns.some((column, i) => header[i] !== column.name)) {
-      throw new RemoteError("schema", `${def.name} の見出しが合わない`);
-    }
-  });
-  return Object.fromEntries(found) as SheetIds;
+  return sheetIds as SheetIds;
 }
 
 // 2人目の初期化。貼られた URL か ID を検査し、スプレッドシートの ID を返す。
@@ -183,21 +161,29 @@ export class SheetsRemote implements RemoteStore {
       const def = TABLE_SHEETS[table];
       const versionAt = columnIndex(def, VERSION_COLUMNS[table]);
       const deletedAt = columnIndex(def, DELETED_AT);
+      const checkedAt = columnIndex(def, "checked_updated_at");
       const refs: RemoteRowRef[] = [];
       (ranges[i]?.values ?? []).forEach((cells, offset) => {
         const id = cells[0];
         if (!isId(id)) return;
-        const version = cells[versionAt];
-        const deleted = cells[deletedAt];
-        refs.push({
+        // 読めない版は null にして、ローカルの正しい行で上書きできるようにする
+        const isoOrNull = (cell: Cell | undefined) => (isIso(cell) ? cell : null);
+        const version = isoOrNull(cells[versionAt]);
+        const deleted = isoOrNull(cells[deletedAt]);
+        const ref: RemoteRowRef = {
           id,
           rowNumber: FIRST_DATA_ROW + offset,
-          // 読めない版は null にして、ローカルの正しい行で上書きできるようにする
-          version: newestVersion(
-            isIso(version) ? version : null,
-            isIso(deleted) ? deleted : null,
-          ),
-        });
+          version: newestVersion(version, deleted),
+        };
+        if (table === "items") {
+          const check = isoOrNull(cells[checkedAt]);
+          ref.version = newestVersion(ref.version, check);
+          ref.parts = {
+            body: newestVersion(version, deleted),
+            check: newestVersion(check, deleted),
+          };
+        }
+        refs.push(ref);
       });
       index[table] = refs;
     });
@@ -229,16 +215,19 @@ export class SheetsRemote implements RemoteStore {
         });
         continue;
       }
-      const row = rowData(encodeChange(write));
+      const cells = encodeChange(write);
+      const row = rowData(cells);
       if (write.kind === "update") {
         appendSheetId = null;
-        requests.push({
-          updateCells: {
-            start: { sheetId, rowIndex: write.rowNumber - 1, columnIndex: 0 },
-            rows: [row],
-            fields: "userEnteredValue",
-          },
-        });
+        for (const [from, to] of updateSpans(write, cells.length)) {
+          requests.push({
+            updateCells: {
+              start: { sheetId, rowIndex: write.rowNumber - 1, columnIndex: from },
+              rows: [rowData(cells.slice(from, to))],
+              fields: "userEnteredValue",
+            },
+          });
+        }
       } else if (appendSheetId === sheetId) {
         appendRows.push(row);
       } else {

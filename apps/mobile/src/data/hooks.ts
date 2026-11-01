@@ -4,7 +4,7 @@ import { sectionItems, type Id, type ListDirection, type SyncTable, type TableRo
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import { SESSION_KEY } from "./repository.ts";
-import { INVITE_KEY, localStore, orderForStore, repository, SHEET_KEY, syncRunner } from "./runtime.ts";
+import { INVITE_KEY, localStore, orderForStore, OWNER_KEY, repository, SHEET_KEY, syncRunner } from "./runtime.ts";
 import { activeSession } from "./shopping.ts";
 import type { SheetRef } from "./spreadsheet.ts";
 import type { SyncStatus } from "./syncRunner.ts";
@@ -18,6 +18,14 @@ export function usePendingCount(): number {
   return useSyncExternalStore(
     (listener) => localStore.subscribe("pending", listener),
     () => localStore.pendingCountNow(),
+  );
+}
+
+// 件数が変わるたびに描き直したくない画面のため、有無だけを読む
+export function useHasPending(): boolean {
+  return useSyncExternalStore(
+    (listener) => localStore.subscribe("pending", listener),
+    () => localStore.pendingCountNow() > 0,
   );
 }
 
@@ -35,6 +43,18 @@ export function useSheet(): SheetRef | null {
 
 export function usePendingInvite(): string | null {
   return useSetting(INVITE_KEY);
+}
+
+export function useAccountOwner(): string | null {
+  return useSetting(OWNER_KEY);
+}
+
+// シートの切り替えの通信の間は true。画面は操作を止める表示を出す
+export function useWritesLocked(): boolean {
+  return useSyncExternalStore(
+    (listener) => localStore.subscribe("writesLocked", listener),
+    localStore.writesLocked,
+  );
 }
 
 export function useSyncStatus(): SyncStatus {

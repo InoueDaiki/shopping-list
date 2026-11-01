@@ -36,6 +36,17 @@ function setup(responses: FetchResponse[]) {
 }
 
 describe("SheetsClient", () => {
+  it.each([408, 425])("%i は再試行する", async (code) => {
+    const { client, requests } = setup([response(code), response(200, { valueRanges: [] })]);
+    await client.batchGet("sheet", ["Items!A2:B"]);
+    expect(requests).toHaveLength(2);
+  });
+
+  it.each([408, 425])("%i が続いても拒否(invalid)にしない", async (code) => {
+    const { client } = setup([response(code), response(code), response(code), response(code)]);
+    await expect(client.batchGet("sheet", ["Items!A2:B"])).rejects.toMatchObject({ kind: "server" });
+  });
+
   it("batchGet は範囲を符号化し、入力のままの値を求める", async () => {
     const { client, requests } = setup([
       response(200, { valueRanges: [{ values: [["a"]] }, {}] }),

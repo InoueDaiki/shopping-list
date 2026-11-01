@@ -19,6 +19,7 @@ function item(id: string, updatedAt: string, overrides: Partial<Item> = {}): Ite
     checked: false,
     checkedAt: null,
     checkedStoreId: null,
+    checkedUpdatedAt: updatedAt,
     updatedAt,
     ...overrides,
   };
@@ -425,6 +426,121 @@ describe("2端末の同期", () => {
   });
 });
 
+describe("列単位の後勝ち", () => {
+  const checked = (at: string) => ({
+    checked: true,
+    checkedAt: at,
+    checkedStoreId: "s1",
+    checkedUpdatedAt: at,
+  });
+
+  async function twoDevices() {
+    const remote = new MemoryRemoteStore();
+    const a = device(remote);
+    const b = device(remote);
+    await a.local.commit([putItem(item("i1", T(1), { categoryId: "c1" }))]);
+    await a.engine.sync();
+    await b.engine.sync();
+    const base = a.local.rows.items.get("i1") as Item;
+    return { remote, a, b, base };
+  }
+
+  const expectBoth = (
+    devices: ReturnType<typeof device>[],
+    expected: Partial<Item>,
+  ) => {
+    for (const { local } of devices) {
+      expect(local.rows.items.get("i1")).toMatchObject(expected);
+    }
+  };
+
+  it("A のチェックが、後から送る B のメモの編集で消えない", async () => {
+    const { remote, a, b, base } = await twoDevices();
+    await a.local.commit([putItem({ ...base, ...checked(T(2)) })]);
+    await b.local.commit([putItem({ ...base, memo: "2本", updatedAt: T(3) })]);
+
+    await a.engine.sync();
+    const result = await b.engine.sync();
+    await a.engine.sync();
+
+    expect(result.superseded).toBe(0);
+    expectBoth([a, b], { checked: true, checkedAt: T(2), checkedStoreId: "s1", memo: "2本" });
+    expect(remote.rows.items[0]).toMatchObject({ checked: true, memo: "2本" });
+  });
+
+  it("B のカテゴリの修正が、後から送る A のチェックで消えない", async () => {
+    const { a, b, base } = await twoDevices();
+    await b.local.commit([
+      putItem({ ...base, categoryId: "c2", categorySource: "user", updatedAt: T(2) }),
+    ]);
+    await a.local.commit([putItem({ ...base, ...checked(T(3)) })]);
+
+    await b.engine.sync();
+    await a.engine.sync();
+    await b.engine.sync();
+
+    expectBoth([a, b], { categoryId: "c2", categorySource: "user", checked: true });
+  });
+
+  it("古い時刻の編集でも、触っていない部分の新しい値を巻き戻さない", async () => {
+    const { a, b, base } = await twoDevices();
+    await a.local.commit([putItem({ ...base, ...checked(T(5)) })]);
+    await a.engine.sync();
+    await b.local.commit([putItem({ ...base, memo: "古い時計", updatedAt: T(3) })]);
+    await b.engine.sync();
+    await a.engine.sync();
+
+    expectBoth([a, b], { checked: true, memo: "古い時計" });
+  });
+
+  it("読んでから書くまでの間に相手が書いても、消し合わない", async () => {
+    const { remote, a, b, base } = await twoDevices();
+    await b.local.commit([putItem({ ...base, memo: "2本", updatedAt: T(3) })]);
+    remote.afterLocate = async () => {
+      await a.local.commit([putItem({ ...base, ...checked(T(2)) })]);
+      await a.engine.sync();
+    };
+    await b.engine.sync();
+    await a.engine.sync();
+
+    expectBoth([a, b], { checked: true, memo: "2本" });
+  });
+
+  it("同じ部分の競合は新しい版を取る(チェック × チェックを外す)", async () => {
+    const { a, b, base } = await twoDevices();
+    await a.local.commit([putItem({ ...base, ...checked(T(2)) })]);
+    await b.local.commit([putItem({ ...base, checkedUpdatedAt: T(3) })]);
+    await a.engine.sync();
+    await b.engine.sync();
+    await a.engine.sync();
+
+    expectBoth([a, b], { checked: false, checkedAt: null });
+  });
+
+  it("チェックのほうが墓石より新しければ、行は生きている", async () => {
+    const { remote, a, b, base } = await twoDevices();
+    await a.local.commit([{ action: "delete", table: "items", id: "i1", at: T(2) }]);
+    await b.local.commit([putItem({ ...base, ...checked(T(3)) })]);
+    await a.engine.sync();
+    await b.engine.sync();
+    await a.engine.sync();
+
+    expectBoth([a, b], { checked: true });
+    expect(remote.rows.items).toHaveLength(1);
+  });
+
+  it("墓石のほうが新しければ、チェックは行を生き返らせない", async () => {
+    const { a, b, base } = await twoDevices();
+    await b.local.commit([putItem({ ...base, ...checked(T(2)) })]);
+    await a.local.commit([{ action: "delete", table: "items", id: "i1", at: T(3) }]);
+    await a.engine.sync();
+    const result = await b.engine.sync();
+
+    expect(result.superseded).toBe(1);
+    expect(b.local.rows.items.has("i1")).toBe(false);
+  });
+});
+
 describe("拒否された操作の隔離", () => {
   const rejectId = (id: string) => (write: RemoteWrite) =>
     write.kind === "insert" && write.table === "items" && write.row.id === id;
@@ -687,5 +803,33 @@ describe("planPush", () => {
       { lists: [{ id: "l1", rowNumber: 2, version: null }] },
     );
     expect(writes(plan)[0]?.kind).toBe("update");
+  });
+
+  it("片方の部分だけが勝てば、その部分だけを書く", () => {
+    const parts = { body: T(2), check: T(2) };
+    const ref = { id: "i1", rowNumber: 3, version: T(2), parts };
+    const planFor = (row: Item) => writes(planPush([op(1, row)], { items: [ref] }));
+
+    expect(planFor(item("i1", T(3), { checkedUpdatedAt: T(1) }))).toMatchObject([
+      { kind: "update", part: "body" },
+    ]);
+    expect(planFor(item("i1", T(1), { checkedUpdatedAt: T(3) }))).toMatchObject([
+      { kind: "update", part: "check" },
+    ]);
+    expect(planFor(item("i1", T(3)))[0]).not.toHaveProperty("part");
+    expect(planFor(item("i1", T(1)))).toEqual([]);
+  });
+
+  it("消す操作はどちらの部分の版にも勝たないと書かない", () => {
+    const plan = planPush(
+      [{ action: "delete", table: "items", id: "i1", at: T(2), seq: 1 }],
+      {
+        items: [
+          { id: "i1", rowNumber: 3, version: T(3), parts: { body: T(1), check: T(3) } },
+        ],
+      },
+    );
+    expect(plan.steps).toEqual([]);
+    expect(plan.superseded).toBe(1);
   });
 });

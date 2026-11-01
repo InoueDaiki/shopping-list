@@ -2,27 +2,29 @@ import { Alert, Button, Card, Field, Input, Text } from "@shopping-list/ui-nativ
 import { useState } from "react";
 import { View } from "react-native";
 
-import { connectSheet, sheetsClient } from "../data/runtime.ts";
-import { createSheet, openExistingSheet, sheetErrorMessage, type SheetRef } from "../data/spreadsheet.ts";
-
-type Busy = "create" | "open" | null;
+import { sheetDraftStore, sheetsClient, switchSheet } from "../data/runtime.ts";
+import { createSheet, sheetErrorMessage } from "../data/spreadsheet.ts";
+import { InitSheetDialog, useOpenSheet } from "./useOpenSheet.tsx";
 
 // シートを決める。新しく作るか、URL を貼って既存のものを開くかを同じ画面で選ぶ。
 // spreadsheets のスコープでは Drive の一覧を取れないので、既存のものは URL を貼る
 export function SheetSetupForm({ onDone }: { onDone?: () => void }) {
   const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState<Busy>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const opener = useOpenSheet(onDone);
+  const error = createError ?? opener.error;
+  const busy = creating || opener.busy;
 
-  const run = async (kind: Exclude<Busy, null>, task: () => Promise<SheetRef>, input = "") => {
-    setBusy(kind);
-    setError(null);
+  const create = async () => {
+    setCreating(true);
+    setCreateError(null);
     try {
-      await connectSheet(await task());
+      await switchSheet(() => createSheet(sheetsClient, sheetDraftStore));
       onDone?.();
     } catch (e) {
-      setError(sheetErrorMessage(e, input));
-      setBusy(null);
+      setCreateError(sheetErrorMessage(e));
+      setCreating(false);
     }
   };
 
@@ -34,8 +36,8 @@ export function SheetSetupForm({ onDone }: { onDone?: () => void }) {
         <Text className="text-sm text-fg-muted">
           自分の Google ドライブにスプレッドシートを作ります。一緒に使う人には、Google スプレッドシートの画面から編集の権限を渡してください。
         </Text>
-        <Button variant="primary" disabled={busy !== null} onPress={() => void run("create", () => createSheet(sheetsClient))}>
-          {busy === "create" ? "作っています…" : "新しく作る"}
+        <Button variant="primary" disabled={busy} onPress={() => void create()}>
+          {creating ? "作っています…" : "新しく作る"}
         </Button>
       </Card>
       <Card className="gap-3">
@@ -51,12 +53,16 @@ export function SheetSetupForm({ onDone }: { onDone?: () => void }) {
           />
         </Field>
         <Button
-          disabled={busy !== null || url.trim() === ""}
-          onPress={() => void run("open", () => openExistingSheet(sheetsClient, url), url)}
+          disabled={busy || url.trim() === ""}
+          onPress={() => {
+            setCreateError(null);
+            void opener.open(url);
+          }}
         >
-          {busy === "open" ? "確かめています…" : "開く"}
+          {opener.busy ? "確かめています…" : "開く"}
         </Button>
       </Card>
+      <InitSheetDialog opener={opener} />
     </View>
   );
 }

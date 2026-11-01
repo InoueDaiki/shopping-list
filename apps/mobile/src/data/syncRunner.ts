@@ -1,8 +1,12 @@
-// 同期をいつ動かすかを決める。起動時、前面に来たとき、買い物中は30秒ごと、書き込みの少し後。
+// 同期をいつ動かすかを決める。起動時、前面に来たとき、背面へ移るとき(未送信があれば)、
+// 買い物中は30秒ごと、リストの画面を開いている間は60秒ごと、書き込みの少し後。
 // 結果は画面が読める状態にまとめる
 import { RemoteError, type RemoteErrorKind, type RowIssue, type SyncResult } from "@shopping-list/core";
 
 export const SHOPPING_SYNC_INTERVAL_MS = 30_000;
+// 買い物をしていなくても、リストの画面を開いている間はもう1人の変更を読む。
+// 同期1回は読み取り1回から3回なので、毎分60回の上限に十分な余裕がある
+export const LIST_SYNC_INTERVAL_MS = 60_000;
 // 続けて書いても1回の送信にまとめる
 export const WRITE_SYNC_DELAY_MS = 3_000;
 // 回数の上限で残したときに、もう一度試すまでの間
@@ -20,8 +24,8 @@ export interface SyncStatus {
 
 export interface SyncRunnerDeps {
   sync: () => Promise<SyncResult>;
-  // 同期が終わるたびに呼ぶ(トリップの片付け)
-  afterSync?: () => void;
+  // 同期が終わるたびに呼ぶ(トリップの片付け、リストの無い品目の片付け)
+  afterSync?: (result: SyncResult) => void;
   // 送信待ちの数。同期の途中で足された分を送り直すのに使う
   pendingCount: () => number;
   now?: () => number;
@@ -40,6 +44,7 @@ export class SyncRunner {
   #paused = false;
   #foreground = true;
   #shopping = false;
+  #viewingList = false;
   #running: Promise<void> | null = null;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #interval: ReturnType<typeof setInterval> | null = null;
@@ -77,12 +82,19 @@ export class SyncRunner {
     if (this.#foreground === foreground) return;
     this.#foreground = foreground;
     this.#resetInterval();
-    if (foreground && this.#started) void this.syncNow();
+    // 背面では止められることがあるので、未送信は待たずに送る
+    if (this.#started && (foreground || this.#deps.pendingCount() > 0)) void this.syncNow();
   }
 
   setShopping(shopping: boolean): void {
     if (this.#shopping === shopping) return;
     this.#shopping = shopping;
+    this.#resetInterval();
+  }
+
+  setViewingList(viewing: boolean): void {
+    if (this.#viewingList === viewing) return;
+    this.#viewingList = viewing;
     this.#resetInterval();
   }
 
@@ -128,10 +140,12 @@ export class SyncRunner {
         issues: result.pulled ? result.issues : this.#status.issues,
         lastSyncedAt: result.pulled ? (this.#deps.now ?? Date.now)() : this.#status.lastSyncedAt,
       });
-      this.#deps.afterSync?.();
+      this.#deps.afterSync?.(result);
       if (result.status === "deferred") this.#schedule(DEFERRED_SYNC_DELAY_MS);
       // 同期の途中に足された分だけ送り直す。拒否されて隔離された操作は残り続けるので、数に含めない
-      else if (result.status === "ok" && this.#deps.pendingCount() > result.pending) this.#schedule(WRITE_SYNC_DELAY_MS);
+      else if (result.status === "ok" && this.#deps.pendingCount() > result.pending) {
+        this.#schedule(this.#foreground ? WRITE_SYNC_DELAY_MS : 0);
+      }
       else if (result.status === "failed") this.#retryLater();
     } catch (error) {
       // シート ID を含むかもしれないので、本文は出さない
@@ -171,8 +185,8 @@ export class SyncRunner {
   #resetInterval(): void {
     if (this.#interval !== null) clearInterval(this.#interval);
     this.#interval = null;
-    if (this.#started && this.#foreground && this.#shopping) {
-      this.#interval = setInterval(() => void this.syncNow(), SHOPPING_SYNC_INTERVAL_MS);
-    }
+    if (!this.#started || !this.#foreground) return;
+    const intervalMs = this.#shopping ? SHOPPING_SYNC_INTERVAL_MS : this.#viewingList ? LIST_SYNC_INTERVAL_MS : null;
+    if (intervalMs !== null) this.#interval = setInterval(() => void this.syncNow(), intervalMs);
   }
 }

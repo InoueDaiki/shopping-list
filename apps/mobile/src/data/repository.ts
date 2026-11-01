@@ -12,7 +12,15 @@ import {
 } from "@shopping-list/core";
 
 import type { SqliteLocalStore } from "./localStore.ts";
-import { activeSession, reviewDirection, startSession, withManualDirection, type ShoppingSession } from "./shopping.ts";
+import {
+  activeSession,
+  isStoreCorrection,
+  reviewDirection,
+  sessionChecks,
+  startSession,
+  withManualDirection,
+  type ShoppingSession,
+} from "./shopping.ts";
 import { finishedTripChanges } from "./trips.ts";
 
 export const SESSION_KEY = "shoppingSession";
@@ -21,8 +29,8 @@ export interface RepositoryDeps {
   store: SqliteLocalStore;
   newId: () => Id;
   now: () => Iso;
-  // 店舗のカテゴリの順番(向きの判定に使う)
-  orderForStore: (storeId: Id | null) => readonly Id[];
+  // 店舗の学んだ順番(向きの判定に使う)。店舗が無いときと学んでいないときは null
+  learnedOrder: (storeId: Id | null) => readonly Id[] | null;
 }
 
 export type ItemPatch = Partial<Pick<Item, "name" | "categoryId" | "memo">>;
@@ -35,13 +43,13 @@ export class Repository {
   readonly #store: SqliteLocalStore;
   readonly #newId: () => Id;
   readonly #now: () => Iso;
-  readonly #orderForStore: (storeId: Id | null) => readonly Id[];
+  readonly #learnedOrder: (storeId: Id | null) => readonly Id[] | null;
 
   constructor(deps: RepositoryDeps) {
     this.#store = deps.store;
     this.#newId = deps.newId;
     this.#now = deps.now;
-    this.#orderForStore = deps.orderForStore;
+    this.#learnedOrder = deps.learnedOrder;
   }
 
   // --- リスト ---
@@ -79,6 +87,7 @@ export class Repository {
       .rows("items")
       .some((item) => item.listId === listId && !item.checked && normalizeItemName(item.name) === key);
     if (exists) return null;
+    const at = this.#now();
     const item: Item = {
       id: this.#newId(),
       listId,
@@ -89,7 +98,8 @@ export class Repository {
       checked: false,
       checkedAt: null,
       checkedStoreId: null,
-      updatedAt: this.#now(),
+      checkedUpdatedAt: at,
+      updatedAt: at,
     };
     this.#store.commitNow([{ action: "put", table: "items", row: item }]);
     return item;
@@ -123,9 +133,9 @@ export class Repository {
     // 向きの切り替えだけで始まった買い物は、まだ店舗を聞いていない。スキップの後は聞き直さない
     const first = current === null || (current.storeId === null && !this.#hasChecks(current));
     const session = { ...(current ?? startSession(now)), touchedAt: now };
-    const checked: Item = { ...item, checked: true, checkedAt: now, checkedStoreId: session.storeId, updatedAt: now };
+    const checked: Item = { ...item, checked: true, checkedAt: now, checkedStoreId: session.storeId, checkedUpdatedAt: now };
     this.#store.commitNow([{ action: "put", table: "items", row: checked }]);
-    this.#saveSession(reviewDirection(session, this.#orderForStore(session.storeId), this.#store.rows("items")));
+    this.#saveSession(reviewDirection(session, this.#learnedOrder(session.storeId), this.#store.rows("items")));
     return first;
   }
 
@@ -138,7 +148,7 @@ export class Repository {
   uncheckItem(id: Id): void {
     const item = this.#item(id);
     if (!item?.checked) return;
-    const row: Item = { ...item, checked: false, checkedAt: null, checkedStoreId: null, updatedAt: this.#now() };
+    const row: Item = { ...item, checked: false, checkedAt: null, checkedStoreId: null, checkedUpdatedAt: this.#now() };
     this.#store.commitNow([{ action: "put", table: "items", row }]);
   }
 
@@ -157,24 +167,25 @@ export class Repository {
     this.#store.setSetting(SESSION_KEY, JSON.stringify(session));
   }
 
-  // 今の店舗を決める。このトリップのチェックは新しい店舗へ付け替える(選び直しを正しい記録にする)
+  // 今の店舗を決める。最後のチェックから5分以内は選び直しとして、このトリップのチェックを
+  // 新しい店舗へ付け替える。過ぎていれば前のチェックはそのままで、以後を新しいトリップにする
   selectStore(storeId: Id): void {
     const now = this.#now();
     const session = this.currentSession() ?? startSession(now);
-    const startedAt = Date.parse(session.startedAt);
-    const moved = this.#store
-      .rows("items")
-      .filter(
-        (item) =>
-          item.checked &&
-          item.checkedAt !== null &&
-          Date.parse(item.checkedAt) >= startedAt &&
-          item.checkedStoreId === session.storeId,
-      )
-      .map((item): LocalChange => ({ action: "put", table: "items", row: { ...item, checkedStoreId: storeId, updatedAt: now } }));
-    this.#store.commitNow(moved);
+    if (session.storeId === storeId) {
+      this.#saveSession({ ...session, touchedAt: now });
+      return;
+    }
+    const checks = sessionChecks(this.#store.rows("items"), session);
+    if (checks.length > 0 && !isStoreCorrection(checks, now)) {
+      this.#saveSession(startSession(now, storeId));
+      return;
+    }
+    this.#store.commitNow(
+      checks.map((item): LocalChange => ({ action: "put", table: "items", row: { ...item, checkedStoreId: storeId, checkedUpdatedAt: now } })),
+    );
     const next = { ...session, storeId, touchedAt: now };
-    this.#saveSession(reviewDirection(next, this.#orderForStore(storeId), this.#store.rows("items")));
+    this.#saveSession(reviewDirection(next, this.#learnedOrder(storeId), this.#store.rows("items")));
   }
 
   setDirection(direction: ListDirection): void {
@@ -188,9 +199,31 @@ export class Repository {
     return changes.length / 2;
   }
 
+  // リストの無い品目を墓石にする。リストを消す前にほかの端末が足した分は、消した端末からは
+  // 見えないので、同期のたびに片付ける。消した品目の数を返す
+  removeOrphanItems(): number {
+    const lists = new Set(this.#store.rows("lists").map((list) => list.id));
+    const at = this.#now();
+    const changes = this.#store
+      .rows("items")
+      .filter((item) => !lists.has(item.listId))
+      .map((item): LocalChange => ({ action: "delete", table: "items", id: item.id, at }));
+    this.#store.commitNow(changes);
+    return changes.length;
+  }
+
   // --- 店舗 ---
 
+  // 同じ名前(normalizeItemName で同じ)の店舗を探す
+  findStore(name: string): Store | undefined {
+    const key = normalizeItemName(name);
+    return this.#store.rows("stores").find((row) => normalizeItemName(row.name) === key);
+  }
+
+  // 同じ名前の店舗があれば足さず、その ID を返す
   addStore(name: string, position: { lat: number; lng: number } | null): Id {
+    const existing = this.findStore(name);
+    if (existing) return existing.id;
     const store: Store = {
       id: this.#newId(),
       name: name.trim(),
@@ -215,7 +248,7 @@ export class Repository {
     const hasOrder = this.#store.rows("storeOrders").some((row) => row.storeId === id);
     const order: LocalChange[] = hasOrder ? [{ action: "delete", table: "storeOrders", id, at }] : [];
     this.#store.commitNow([
-      ...items.map((item): LocalChange => ({ action: "put", table: "items", row: { ...item, checkedStoreId: null, updatedAt: at } })),
+      ...items.map((item): LocalChange => ({ action: "put", table: "items", row: { ...item, checkedStoreId: null, checkedUpdatedAt: at } })),
       ...order,
       { action: "delete", table: "stores", id, at },
     ]);
