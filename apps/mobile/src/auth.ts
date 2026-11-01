@@ -258,14 +258,15 @@ class AuthStore {
 
   // Sheets API の呼び出しに付けるアクセストークン。期限が近ければ更新する。
   // ログインが切れていれば LoginRequiredError を投げる(通信の失敗はそのまま投げ、ログインを保つ)
-  async getAccessToken(): Promise<string> {
+  // forceRefresh は、Sheets API が 401 を返したときに、期限の前でも取り直す
+  async getAccessToken({ forceRefresh = false }: { forceRefresh?: boolean } = {}): Promise<string> {
     await this.load();
     const session = this.session;
     if (!session) {
       throw new LoginRequiredError();
     }
     const { token } = session;
-    if (token.shouldRefresh() && token.refreshToken) {
+    if ((forceRefresh || token.shouldRefresh()) && token.refreshToken) {
       return (await this.refresh(session)).accessToken;
     }
     // リフレッシュトークンが無いまま期限が切れた。更新できないので、ログインし直してもらう
@@ -328,8 +329,8 @@ class AuthStore {
 export const auth = new AuthStore();
 
 // packages/sheets の client に渡す
-export function getAccessToken(): Promise<string> {
-  return auth.getAccessToken();
+export function getAccessToken(options?: { forceRefresh?: boolean }): Promise<string> {
+  return auth.getAccessToken(options);
 }
 
 // 失敗は投げず、useAuth の signedOut の error に出す

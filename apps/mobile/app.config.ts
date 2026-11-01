@@ -18,5 +18,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: ["expo-router", "expo-secure-store", "expo-web-browser", "expo-sqlite", "expo-location"],
   extra: {
     googleOAuthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID ?? "",
+    // EXPO_PUBLIC_DEMO=1 でビルドすると、シート無しで動く(エミュレーターの確認と E2E 用)
+    demo: process.env.EXPO_PUBLIC_DEMO === "1",
   },
 });
