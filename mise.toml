@@ -5,6 +5,8 @@ node = "24.21.0"
 pnpm = "12.10.1"
 # Android のビルド(Gradle)。Android SDK はホストでは Android Studio が入れたもの、CI ではランナーのものを使う
 java = "temurin-17.0.14+7"
+# E2E(e2e/)。公式の配布物(GitHub Releases の maestro.zip)。Java は上の版で動く
+maestro = "cli-2.12.0"
 
 [env]
 _.file = { path = ".env", tools = false }
@@ -44,3 +46,22 @@ run = [
   "cd apps/mobile/android && ./gradlew assembleRelease",
   "ls -l apps/mobile/android/app/build/outputs/apk/release/app-release.apk",
 ]
+
+[tasks."e2e:build"]
+description = "E2E 用のデモモードのリリース APK をビルドし、e2e/output/demo.apk に置く。ABI は E2E_ABI(既定は arm64-v8a)"
+# 配布の鍵は使わない。配布用の APK と取り違えないよう、ビルドの置き場から移す
+env = { ANDROID_HOME = "{{ get_env(name='ANDROID_HOME', default=env.HOME ~ '/Library/Android/sdk') }}", EXPO_NO_GIT_STATUS = "1", EXPO_PUBLIC_DEMO = "1", ANDROID_KEYSTORE_PATH = "" }
+run = [
+  "pnpm --dir apps/mobile exec expo prebuild --platform android --no-install --clean",
+  "cd apps/mobile/android && ./gradlew assembleRelease -PreactNativeArchitectures=${E2E_ABI:-arm64-v8a}",
+  "mkdir -p e2e/output && mv apps/mobile/android/app/build/outputs/apk/release/app-release.apk e2e/output/demo.apk",
+]
+
+[tasks."e2e:test"]
+description = "動いているエミュレーターに e2e/output/demo.apk を入れて Maestro を走らせる"
+env = { ANDROID_HOME = "{{ get_env(name='ANDROID_HOME', default=env.HOME ~ '/Library/Android/sdk') }}" }
+run = "bash e2e/run.sh"
+
+[tasks.e2e]
+description = "デモモードのリリース APK をビルドし、動いているエミュレーターで E2E を走らせる"
+run = ["mise run e2e:build", "mise run e2e:test"]

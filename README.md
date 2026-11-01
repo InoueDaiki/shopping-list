@@ -61,6 +61,9 @@
 | `mise run mobile` | Metro を起動する |
 | `mise run mobile:android` | 開発ビルドを Android 向けにビルドして入れる |
 | `mise run build:android` | 配布用のリリース APK をビルドする(下の「配布」) |
+| `mise run e2e` | デモモードのリリース APK をビルドし、動いているエミュレーターで E2E(Maestro)を走らせる。ビルド済みなら `mise run e2e:test` |
+
+E2E はアプリのデータを消すので、エミュレーターでしか動かない。先に `emulator -avd Medium_Phone` などで起動しておき、2台以上動いていれば `ANDROID_SERIAL` で選ぶ。結果は `e2e/output/results` に出る。
 
 ## CI(GitHub Actions)
 
@@ -71,6 +74,7 @@
 | `ci.yml` | PR と main への push | `mise run lint`、`mise run test` |
 | `gen.yml` | PR と main への push | 生成物が古ければ落とす |
 | `android.yml` | main への push | `mise run build:android`。開発用の鍵で署名し、成果物は残さず成功だけを見る |
+| `e2e.yml` | main への push | x86_64 のデモの APK(`E2E_ABI`)を作り、エミュレーターで `mise run e2e:test` |
 
 ## 配布
 

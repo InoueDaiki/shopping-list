@@ -1,0 +1,105 @@
+# 買い物の一連の流れ。デモモードの初期データ(apps/mobile/src/data/demo.ts)を使う
+appId: io.github.inouedaiki.shoppinglist
+---
+- launchApp:
+    clearState: true
+- assertVisible: 買い物リスト
+- assertVisible: スーパー
+
+# リストを作る
+- tapOn: リストを追加
+- inputText: テストの店
+- tapOn: 追加する
+- tapOn: テストの店
+- assertVisible: 品目がありません。下のボタンから追加してください。
+
+# 過去に無い品目は、その場でカテゴリを選ぶ
+- tapOn: 追加
+- inputText: 洗剤
+- tapOn: 追加
+- assertVisible: カテゴリを選ぶ
+- tapOn: 日用品
+- assertVisible: 「洗剤」を追加しました
+
+# ほかのリストの履歴から、候補で足す
+- inputText: バナ
+- assertVisible: ほかのリスト
+- tapOn: バナナ
+- assertVisible: 「バナナ」を追加しました
+- hideKeyboard
+- back
+- assertVisible: 洗剤
+- assertVisible: 日用品
+- assertVisible: 果物
+- back
+
+# よく使う品目のチップから足す
+- tapOn: スーパー
+- tapOn: 追加
+- assertVisible: よく使う品目
+- tapOn: ヨーグルト
+- assertVisible: 「ヨーグルト」を追加しました
+- hideKeyboard
+- back
+- assertVisible: ヨーグルト
+
+# トリップの最初のチェックで店舗を聞かれ、その場で登録する
+- tapOn: 牛乳
+- assertVisible: どの店舗で買いますか
+- tapOn: 店舗の名前
+- inputText: テスト店舗
+- tapOn: 登録して選ぶ
+- assertVisible: テスト店舗
+- assertVisible: チェック済み 1
+- assertVisible:
+    text: 鮮魚
+    above: 生肉
+
+# 店舗のカテゴリの順番を変える
+- back
+- tapOn: 設定
+- tapOn: 店舗とカテゴリの順番
+- tapOn: テスト店舗
+- assertVisible: カテゴリの順番
+- tapOn: 鮮魚を下へ
+- tapOn: 鮮魚を下へ
+- scrollUntilVisible:
+    element: 保存する
+- tapOn: 保存する
+- back
+- back
+- tapOn: スーパー
+- assertVisible:
+    text: 生肉
+    above: 鮮魚
+
+# 降順にする。未分類は向きによらず最後
+- tapOn: 昇順。降順に切り替える
+- assertVisible: 降順。昇順に切り替える
+- assertVisible:
+    text: 鮮魚
+    above: 生肉
+- assertVisible:
+    text: 生肉
+    above: 未分類
+
+# 未分類の品目のカテゴリを直す
+- tapOn: ふしぎな品物を編集
+- assertVisible: 品目を編集
+- tapOn: "カテゴリ: 未分類"
+- tapOn: 調味料
+- assertVisible: "カテゴリ: 調味料"
+- tapOn: 保存する
+- assertNotVisible: 未分類
+- assertVisible:
+    text: ふしぎな品物
+    below: 調味料
+
+# 再起動しても、順番と修正が残っている
+- stopApp
+- launchApp
+- tapOn: スーパー
+- assertVisible:
+    text: ふしぎな品物
+    below: 調味料
+- assertVisible: テスト店舗
