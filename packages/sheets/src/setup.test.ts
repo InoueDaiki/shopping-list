@@ -44,11 +44,11 @@ describe("buildSetupRequests", () => {
     ]);
   });
 
-  it("checked はチェックボックスで strict", () => {
-    expect(ruleOn(items.sheetId, column("checked"))).toMatchObject({
-      condition: { type: "BOOLEAN" },
-      strict: true,
-    });
+  // BOOLEAN にすると空のセルが FALSE と読め、新しい行が入力規則の範囲の外に足される
+  it("checked は真偽値だけを許し、チェックボックスにはしない", () => {
+    const rule = ruleOn(items.sheetId, column("checked"));
+    expect(rule).toMatchObject({ condition: { type: "CUSTOM_FORMULA" }, strict: true });
+    expect(JSON.stringify(rule)).toContain("ISLOGICAL");
   });
 
   it("リストとカテゴリの列は ID のプルダウン", () => {

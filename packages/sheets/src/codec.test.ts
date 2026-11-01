@@ -25,6 +25,21 @@ const item: Item = {
 const asRead = (cells: Cell[]) => cells.map((cell) => (cell === null ? "" : cell));
 
 describe("codec", () => {
+  it("チェックボックスの空のセルしか無い行は空行とする", () => {
+    const cells = encodeRow("items", item).map(() => "");
+    const checked = TABLE_SHEETS.items.columns.findIndex((column) => column.name === "checked");
+    for (const value of [false, "FALSE"]) {
+      cells[checked] = value as string;
+      expect(decodeRow("items", cells, 2)).toEqual({ kind: "blank" });
+    }
+  });
+
+  it("ID が無くて中身のある行は空行にしない", () => {
+    const cells = asRead(encodeRow("items", item));
+    cells[0] = "";
+    expect(decodeRow("items", cells, 2).kind).toBe("issue");
+  });
+
   it("品目を往復できる", () => {
     const decoded = decodeRow("items", asRead(encodeRow("items", item)), 2);
     expect(decoded).toEqual({ kind: "row", row: item, deletedAt: null });

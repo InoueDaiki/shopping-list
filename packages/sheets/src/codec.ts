@@ -28,6 +28,10 @@ export function isId(value: Cell | undefined): value is string {
 const isEmpty = (cell: Cell | undefined) =>
   cell === undefined || cell === null || cell === "";
 
+// チェックボックスの入力規則が掛かった空のセルは FALSE と読める。ID の無い行でそれしか無ければ空行とする
+const isBlankRow = (cells: readonly Cell[]) =>
+  isEmpty(cells[0]) && cells.every((cell) => isEmpty(cell) || cell === false || cell === "FALSE");
+
 // 1行を読みながら問題を集める。問題があれば結果は使わない
 class RowReader {
   readonly problems: RowIssue["problems"] = [];
@@ -248,7 +252,7 @@ export function decodeRow<T extends SyncTable>(
   cells: readonly Cell[],
   rowNumber: number,
 ): Decoded<T> {
-  if (cells.every(isEmpty)) return { kind: "blank" };
+  if (isBlankRow(cells)) return { kind: "blank" };
   const reader = new RowReader(TABLE_SHEETS[table], cells);
   const row = CODECS[table].decode(reader);
   // History には列が無いので常に null になる

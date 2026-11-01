@@ -82,8 +82,12 @@ function condition(column: Column, cell: string): Record<string, unknown> | null
         values: (column.values ?? []).map((value) => ({ userEnteredValue: value })),
       };
     case "bool":
-      // BOOLEAN の入力規則がチェックボックスになる
-      return { type: "BOOLEAN" };
+      // BOOLEAN の入力規則は使わない。空のセルが FALSE と読めてデータのある行に数えられ、
+      // 新しい行が範囲の外に足されるため
+      return {
+        type: "CUSTOM_FORMULA",
+        values: [{ userEnteredValue: `=ISLOGICAL(${cell})` }],
+      };
     case "number":
       return column.min !== undefined && column.max !== undefined
         ? {
