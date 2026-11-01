@@ -38,6 +38,7 @@ describe("buildSetupRequests", () => {
       "checked",
       "checked_at",
       "checked_store_id",
+      "checked_updated_at",
       "updated_at",
       "deleted_at",
     ]);
@@ -67,7 +68,7 @@ describe("buildSetupRequests", () => {
     );
     expect(
       ruleOn(items.sheetId, column("updated_at")).condition.values[0].userEnteredValue,
-    ).toContain("REGEXMATCH(TO_TEXT(J2)");
+    ).toContain("REGEXMATCH(TO_TEXT(K2)");
   });
 
   it("行を持つ表は、History を除いて deleted_at を持つ", () => {

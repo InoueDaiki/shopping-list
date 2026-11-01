@@ -1,8 +1,9 @@
 // 送信待ちを、リモートへの書き込みに変える。副作用の無い計算だけを置く。
 
-import type { Iso } from "../types.ts";
+import type { Iso, Item } from "../types.ts";
 import { changeKey, compareIso, rowVersion } from "./rows.ts";
 import type {
+  ItemPart,
   PendingOp,
   RemoteIndex,
   RemoteRowRef,
@@ -35,6 +36,16 @@ function newestFirst(a: RemoteRowRef, b: RemoteRowRef): number {
     return a.rowNumber - b.rowNumber;
   }
   return compareIso(b.version, a.version) || a.rowNumber - b.rowNumber;
+}
+
+// Items の put で、勝った部分を返す。全部なら undefined、どちらも負けたら null。
+// 操作は行全体を持つが、触っていない部分の版は古いままなので、勝つのは触った部分だけになる
+function winningItemPart(row: Item, head: RemoteRowRef): ItemPart | undefined | null {
+  const body = wins(row.updatedAt, head.parts?.body ?? head.version);
+  const check = wins(row.checkedUpdatedAt, head.parts?.check ?? head.version);
+  if (body && check) return undefined;
+  if (body) return "body";
+  return check ? "check" : null;
 }
 
 // 1件の書き込みと、その元の操作
@@ -96,12 +107,21 @@ export function planPush(ops: PendingOp[], index: RemoteIndex): PushPlan {
     if (head === undefined) {
       const write = { ...op, kind: "insert" } as RemoteWrite;
       (MASTER_TABLES.includes(op.table) ? masterInserts : otherInserts).push({ op, write });
-    } else if (wins(rowVersion(op), head.version)) {
-      const write = { ...op, kind: "update", rowNumber: head.rowNumber } as RemoteWrite;
-      updates.push({ op, write });
-    } else {
+      continue;
+    }
+    const part =
+      op.table === "items"
+        ? winningItemPart(op.row, head)
+        : wins(rowVersion(op), head.version)
+          ? undefined
+          : null;
+    if (part === null) {
       settled.push(op);
       superseded += 1;
+    } else {
+      const base = { ...op, kind: "update", rowNumber: head.rowNumber };
+      const write = (part === undefined ? base : { ...base, part }) as RemoteWrite;
+      updates.push({ op, write });
     }
   }
 

@@ -1,10 +1,11 @@
 // テスト用のインメモリの実装。LocalStore の約束の見本も兼ねる。
 
-import type { Id, Iso } from "../types.ts";
+import type { Id, Iso, Item } from "../types.ts";
 import { changeKey, isTombstoned, newestVersion, rowId, rowVersion } from "./rows.ts";
 import {
   RemoteError,
   type HistoryCursor,
+  type ItemPart,
   type LocalChange,
   type LocalStore,
   type MutableTable,
@@ -92,6 +93,13 @@ export class MemoryLocalStore implements LocalStore {
   }
 }
 
+// 部分の書き込み。書かない部分のセルはシートの値のまま残す
+function mergeItemPart(remote: Item, written: Item, part: ItemPart): Item {
+  const [checkFrom, bodyFrom] = part === "check" ? [written, remote] : [remote, written];
+  const { checked, checkedAt, checkedStoreId, checkedUpdatedAt } = checkFrom;
+  return { ...bodyFrom, checked, checkedAt, checkedStoreId, checkedUpdatedAt };
+}
+
 type RemoteRows = { [T in SyncTable]: TableRows[T][] };
 
 // 配列の添字 + 1 を行の位置とする。墓石はシートの deleted_at の列の代わりに別に持つ
@@ -143,11 +151,18 @@ export class MemoryRemoteStore implements RemoteStore {
         (row, i): RemoteRowRef => {
           const change = { table, row } as RowOf;
           const deletedAt = this.deletedAt[table].get(i + 1) ?? null;
-          return {
+          const ref: RemoteRowRef = {
             id: rowId(change),
             rowNumber: i + 1,
             version: newestVersion(rowVersion(change), deletedAt),
           };
+          if (change.table === "items") {
+            ref.parts = {
+              body: newestVersion(change.row.updatedAt, deletedAt),
+              check: newestVersion(change.row.checkedUpdatedAt, deletedAt),
+            };
+          }
+          return ref;
         },
       );
     }
@@ -171,6 +186,15 @@ export class MemoryRemoteStore implements RemoteStore {
       const rows = this.rows[write.table] as unknown[];
       if (write.kind === "insert") {
         rows.push(write.row);
+      } else if (write.table === "items" && write.part !== undefined) {
+        const items = this.rows.items;
+        items[write.rowNumber - 1] = mergeItemPart(
+          items[write.rowNumber - 1] as Item,
+          write.row,
+          write.part,
+        );
+        // deleted_at は body の側のセル
+        if (write.part === "body") this.deletedAt.items.delete(write.rowNumber);
       } else {
         rows[write.rowNumber - 1] = write.row;
         // 行全体を書くので、deleted_at も空になる

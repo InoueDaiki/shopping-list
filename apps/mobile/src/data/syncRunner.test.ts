@@ -1,7 +1,14 @@
 import { RemoteError, type SyncResult } from "@shopping-list/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DEFERRED_SYNC_DELAY_MS, RETRY_SYNC_DELAY_MS, SHOPPING_SYNC_INTERVAL_MS, SyncRunner, WRITE_SYNC_DELAY_MS } from "./syncRunner.ts";
+import {
+  DEFERRED_SYNC_DELAY_MS,
+  LIST_SYNC_INTERVAL_MS,
+  RETRY_SYNC_DELAY_MS,
+  SHOPPING_SYNC_INTERVAL_MS,
+  SyncRunner,
+  WRITE_SYNC_DELAY_MS,
+} from "./syncRunner.ts";
 
 const OK: SyncResult = { status: "ok", pushed: 0, superseded: 0, pulled: true, pending: 0, issues: [], error: null };
 
@@ -31,6 +38,77 @@ describe("SyncRunner", () => {
     expect(sync).toHaveBeenCalledTimes(1);
     expect(afterSync).toHaveBeenCalledTimes(1);
     expect(runner.status().lastStatus).toBe("ok");
+  });
+
+  it("背面へ移るときに未送信を待たずに送る", async () => {
+    runner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    pending = 2;
+    result = { ...OK, pending: 2 };
+    runner.notifyWrite();
+    runner.setForeground(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sync).toHaveBeenCalledTimes(2);
+    // 待っていた送信の予約は残らない
+    await vi.advanceTimersByTimeAsync(WRITE_SYNC_DELAY_MS);
+    expect(sync).toHaveBeenCalledTimes(2);
+  });
+
+  it("未送信が無ければ、背面へ移るときに通信しない", async () => {
+    runner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    runner.setForeground(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sync).toHaveBeenCalledTimes(1);
+  });
+
+  it("背面へ移るとき走っていた同期の後に足された分も、すぐに送る", async () => {
+    runner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    let finish = (_: SyncResult) => {};
+    sync.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    pending = 1;
+    runner.setForeground(false);
+    pending = 2;
+    finish({ ...OK, pending: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sync).toHaveBeenCalledTimes(3);
+  });
+
+  it("リストの画面を開いている間は60秒ごとに読み、回数の上限に届かない", async () => {
+    runner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    runner.setViewingList(true);
+    await vi.advanceTimersByTimeAsync(LIST_SYNC_INTERVAL_MS * 10);
+    expect(sync).toHaveBeenCalledTimes(11);
+
+    runner.setViewingList(false);
+    await vi.advanceTimersByTimeAsync(LIST_SYNC_INTERVAL_MS * 3);
+    expect(sync).toHaveBeenCalledTimes(11);
+  });
+
+  it("買い物中はリストの画面でも30秒ごとのまま重ねない", async () => {
+    runner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    runner.setShopping(true);
+    runner.setViewingList(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sync).toHaveBeenCalledTimes(3);
+  });
+
+  it("背面ではリストの画面の読み取りを止める", async () => {
+    runner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    runner.setViewingList(true);
+    runner.setForeground(false);
+    await vi.advanceTimersByTimeAsync(LIST_SYNC_INTERVAL_MS * 3);
+    expect(sync).toHaveBeenCalledTimes(1);
+  });
+
+  it("結果を片付けに渡す", async () => {
+    runner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(afterSync).toHaveBeenCalledWith(OK);
   });
 
   it("前面に戻ると同期する", async () => {

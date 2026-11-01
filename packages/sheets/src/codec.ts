@@ -176,6 +176,7 @@ const items: Codec<Item> = {
     checked: r.bool("checked"),
     checkedAt: r.optionalIso("checked_at"),
     checkedStoreId: r.optionalId("checked_store_id"),
+    checkedUpdatedAt: r.iso("checked_updated_at"),
     updatedAt: r.iso("updated_at"),
   }),
   encode: (row) => [
@@ -188,6 +189,7 @@ const items: Codec<Item> = {
     row.checked,
     row.checkedAt,
     row.checkedStoreId,
+    row.checkedUpdatedAt,
     row.updatedAt,
     null,
   ],

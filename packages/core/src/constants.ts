@@ -5,6 +5,9 @@ export const DAY_MS = 24 * HOUR_MS;
 
 // トリップ: 同じ店舗で、前のチェックからこの時間以内なら1回の買い物とする
 export const TRIP_GAP_MS = 3 * HOUR_MS;
+// 店舗の替え方: 最後のチェックからこの時間以内は選び間違いの訂正として付け替え、
+// 過ぎていれば別の店舗へ移ったとみなす(2軒回りで前の店舗の学習を汚さない)
+export const STORE_CORRECTION_MS = 5 * 60 * 1000;
 
 // 順番の学習: カテゴリがこれ未満のトリップは使わない
 export const MIN_TRIP_CATEGORIES = 3;

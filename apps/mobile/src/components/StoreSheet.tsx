@@ -49,8 +49,11 @@ export function StoreSheet({ open, onClose }: StoreSheetProps) {
 
   const register = () => {
     if (name.trim() === "") return;
-    const storeId = repository.addStore(name, position);
+    // 同じ名前の店舗があれば登録せずに選ぶ。別の場所の位置で上書きしない
+    const known = repository.findStore(name);
+    const storeId = known?.id ?? repository.addStore(name, position);
     select(storeId);
+    if (known) return;
     // 測り終える前に登録したら、分かったときに位置を足す。手元の位置は前回の場所のことがある
     void measuring.current.then((point) => {
       const refined = refinedPosition(position, point);

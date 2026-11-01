@@ -1,6 +1,7 @@
 // 店舗ごとのカテゴリの順番。計算の結果を、元の表が変わるまで使い回す
 import {
   groupTrips,
+  hasLearnedOrder,
   learnCategoryOrder,
   masterOrder,
   type Category,
@@ -20,8 +21,9 @@ export interface OrderSources {
 export class OrderCache {
   #sources: OrderSources | null = null;
   #orders = new Map<Id | null, readonly Id[]>();
+  #learned = new Map<Id, boolean>();
 
-  orderFor(storeId: Id | null, sources: OrderSources): readonly Id[] {
+  #refresh(sources: OrderSources): void {
     const held = this.#sources;
     if (
       !held ||
@@ -31,7 +33,28 @@ export class OrderCache {
     ) {
       this.#sources = sources;
       this.#orders = new Map();
+      this.#learned = new Map();
     }
+  }
+
+  // 学んだ順番。学んでいなければ null(チェックのたびに呼ぶので、結果を使い回す)
+  learnedOrderFor(storeId: Id, sources: OrderSources): readonly Id[] | null {
+    this.#refresh(sources);
+    let learned = this.#learned.get(storeId);
+    if (learned === undefined) {
+      learned = hasLearnedOrder({
+        storeId,
+        trips: groupTrips(sources.history),
+        manualOrder: sources.storeOrders.find((row) => row.storeId === storeId) ?? null,
+        now: sources.now,
+      });
+      this.#learned.set(storeId, learned);
+    }
+    return learned ? this.orderFor(storeId, sources) : null;
+  }
+
+  orderFor(storeId: Id | null, sources: OrderSources): readonly Id[] {
+    this.#refresh(sources);
     const cached = this.#orders.get(storeId);
     if (cached) return cached;
     const order =

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { redirectSystemPath } from "../app/+native-intent.ts";
 import type { SyncStatus } from "../data/syncRunner.ts";
+import { accountCheck, ownerValue } from "./account.ts";
 import { categoryToneMap } from "./categoryTone.ts";
 import { inviteLink, inviteMessage, parseInviteLink } from "./invite.ts";
 import { listRows } from "./listRows.ts";
@@ -16,6 +17,36 @@ vi.mock("../data/runtime.ts", () => ({ rememberInvite: mocks.rememberInvite }));
 vi.mock("../config.ts", () => ({ config: { demo: false } }));
 
 const item = (id: string) => ({ id }) as Item;
+
+describe("accountCheck", () => {
+  const check = (email: string | undefined, owner: string | null, hasLocalCopy = true) => accountCheck({ email, owner, hasLocalCopy });
+
+  it("持ち主と同じなら確認しない。大文字と小文字は区別しない", () => {
+    expect(check("Someone@Example.com", "someone@example.com")).toBe("ok");
+  });
+
+  it("違うアカウントなら確認を出す", () => {
+    expect(check("other@example.com", "someone@example.com")).toBe("different");
+  });
+
+  it.each([
+    ["メールが取れない", undefined, "someone@example.com"],
+    ["持ち主を覚えていない", "someone@example.com", null],
+    ["どちらも分からない", undefined, null],
+    ["前はメールが取れなかった", "someone@example.com", ""],
+  ])("比べられないときは確認を出す: %s", (_, email, owner) => {
+    expect(check(email, owner)).toBe("unknown");
+  });
+
+  it("写しが無ければ確認せず持ち主にする", () => {
+    expect(check("someone@example.com", null, false)).toBe("adopt");
+    expect(check("other@example.com", "someone@example.com", false)).toBe("adopt");
+  });
+
+  it("メールが取れないまま受け入れた写しでは、毎回は聞かない", () => {
+    expect(check(undefined, ownerValue(undefined))).toBe("ok");
+  });
+});
 
 describe("listRows", () => {
   it("未チェックのあとにチェック済みの見出しを置く", () => {

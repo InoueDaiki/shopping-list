@@ -1,11 +1,10 @@
 import { Alert, Button, ConfirmDialog, PageHeader, Text } from "@shopping-list/ui-native";
-import { useState } from "react";
 import { View } from "react-native";
 
 import { useLeaveSheetGuard } from "../components/useLeaveSheetGuard.ts";
+import { InitSheetDialog, useOpenSheet } from "../components/useOpenSheet.tsx";
 import { usePendingCount, usePendingInvite, useSheet } from "../data/hooks.ts";
-import { connectSheet, forgetInvite, sheetsClient } from "../data/runtime.ts";
-import { openExistingSheet, sheetErrorMessage } from "../data/spreadsheet.ts";
+import { forgetInvite } from "../data/runtime.ts";
 
 // 招待リンクで開く確認。リンクは外から誰でも開かせられるので、必ず確かめてからシートを読みに行く。
 // 招待が片付くと、いちばん外のレイアウトが元の画面へ戻す
@@ -14,21 +13,13 @@ export default function Join() {
   const sheet = useSheet();
   const pending = usePendingCount();
   const leave = useLeaveSheetGuard();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const opener = useOpenSheet();
+  const { busy, error } = opener;
 
   const same = sheet?.spreadsheetId === invite;
 
-  const open = async () => {
-    if (invite === null) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await connectSheet(await openExistingSheet(sheetsClient, invite));
-    } catch (e) {
-      setError(sheetErrorMessage(e));
-      setBusy(false);
-    }
+  const open = () => {
+    if (invite !== null) void opener.open(invite);
   };
 
   return (
@@ -45,7 +36,7 @@ export default function Join() {
               : "招待されたシートを開きますか。"}
           </Text>
           <Text className="text-sm text-fg-muted">開けないときは、シートの持ち主に編集者の権限を渡すよう頼んでください。</Text>
-          <Button variant="primary" size="lg" disabled={busy || leave.busy} onPress={() => void leave.guard(() => void open())}>
+          <Button variant="primary" size="lg" disabled={busy || leave.busy} onPress={() => void leave.guard(open)}>
             {busy ? "確かめています…" : "シートを開く"}
           </Button>
         </>
@@ -62,6 +53,7 @@ export default function Join() {
         onConfirm={leave.confirm}
         onCancel={leave.cancel}
       />
+      <InitSheetDialog opener={opener} />
     </View>
   );
 }

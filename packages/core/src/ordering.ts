@@ -50,6 +50,18 @@ export function isLearnableTrip(trip: Trip): boolean {
   return gap !== null && gap >= MIN_MEDIAN_CHECK_GAP_MS;
 }
 
+// 店舗の順番を学んだか。学習に使える終わったトリップも手の順番も無ければ、
+// learnCategoryOrder の結果はマスタの順で、売り場の向きとは関係がない
+export function hasLearnedOrder(
+  input: Pick<LearnOrderInput, "storeId" | "trips" | "manualOrder" | "now">,
+): boolean {
+  if (input.manualOrder?.storeId === input.storeId) return true;
+  return input.trips.some(
+    (trip) =>
+      trip.storeId === input.storeId && isTripFinished(trip, input.now) && isLearnableTrip(trip),
+  );
+}
+
 // 手の順番をマスタに合わせる。消えたカテゴリを除き、新しいカテゴリを末尾に足す
 function alignManualOrder(manual: readonly Id[], master: readonly Id[]): Id[] {
   const known = new Set(master);

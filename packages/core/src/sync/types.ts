@@ -55,19 +55,26 @@ export interface RowIssue {
   problems: { column: string; message: string }[];
 }
 
+// Items の版を別に比べる部分。check はチェックの状態、body はそれ以外(deleted_at を含む)
+export type ItemPart = "body" | "check";
+
 // 書く前に調べた、リモートの行の位置と版。行は消さず足すのも末尾だけなので、位置はずれない
 export interface RemoteRowRef {
   id: Id;
   rowNumber: number;
   // 更新の時刻と墓石の時刻の新しいほう。どちらも読めないときは null
   version: Iso | null;
+  // Items だけが持つ、部分ごとの版。それぞれ墓石の時刻との新しいほう。無ければ version で比べる
+  parts?: Record<ItemPart, Iso | null>;
 }
 
 export type RemoteIndex = Partial<Record<MutableTable, RemoteRowRef[]>>;
 
 export type RemoteWrite =
   | (RowOf & { kind: "insert" })
-  | (RowOf & { kind: "update"; rowNumber: number })
+  // part は Items で片方の部分だけが勝ったときに付け、その部分のセルだけを書く。
+  // 無ければ行全体を書く(deleted_at も空になる)
+  | (RowOf & { kind: "update"; rowNumber: number; part?: ItemPart })
   // 消した印(墓石)を deleted_at に書く。ほかのセルは触らない
   | { kind: "tombstone"; table: MutableTable; rowNumber: number; at: Iso };
 

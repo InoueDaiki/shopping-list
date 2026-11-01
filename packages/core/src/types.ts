@@ -43,6 +43,10 @@ export interface Item {
   checked: boolean;
   checkedAt: Iso | null;
   checkedStoreId: Id | null;
+  // チェックの状態(checked、checkedAt、checkedStoreId)の版。買い物中に2人が触っても
+  // チェックとほかの編集が消し合わないよう、updatedAt と別に比べる
+  checkedUpdatedAt: Iso;
+  // チェックの状態以外の版
   updatedAt: Iso;
 }
 

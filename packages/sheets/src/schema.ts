@@ -2,7 +2,7 @@
 
 import type { SyncTable } from "@shopping-list/core";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const ID_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
 export const ID_LIST_PATTERN = "^([A-Za-z0-9_-]{1,64}(,[A-Za-z0-9_-]{1,64})*)?$";
@@ -113,6 +113,7 @@ export const SHEETS: readonly SheetDef[] = [
       { name: "checked", kind: "bool" },
       iso("checked_at"),
       ref("checked_store_id", "Stores"),
+      iso("checked_updated_at"),
       iso("updated_at"),
       iso("deleted_at"),
     ],
@@ -170,6 +171,14 @@ export const TABLE_SHEETS: Readonly<Record<SyncTable, SheetDef>> = {
 };
 
 export const HISTORY_SHEET = TABLE_SHEETS.history;
+
+// Items のチェックの状態の列。checked_updated_at はこれらの版で、updated_at は残りの列の版
+export const ITEM_CHECK_COLUMNS = [
+  "checked",
+  "checked_at",
+  "checked_store_id",
+  "checked_updated_at",
+] as const;
 
 // 列の位置。無い列は -1
 export function columnIndex(def: SheetDef, name: string): number {

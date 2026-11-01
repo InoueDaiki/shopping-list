@@ -18,6 +18,7 @@ function item(overrides: Partial<Item> = {}): Item {
     checked: false,
     checkedAt: null,
     checkedStoreId: null,
+    checkedUpdatedAt: AT,
     updatedAt: AT,
     ...overrides,
   };
@@ -40,6 +41,39 @@ describe("SqliteLocalStore", () => {
 
   beforeEach(() => {
     store = new SqliteLocalStore(openTestDatabase());
+  });
+
+  it("切り替えの間の書き込みは受け付けず、終われば受け付ける", async () => {
+    const seen: boolean[] = [];
+    store.subscribe("writesLocked", () => seen.push(store.writesLocked()));
+    await store.whileWritesLocked(async () => {
+      store.commitNow([put(item({ id: "dropped" }))]);
+    });
+    expect(store.rows("items")).toEqual([]);
+    expect(store.pendingCountNow()).toBe(0);
+    expect(seen).toEqual([true, false]);
+
+    store.commitNow([put(item({ id: "kept" }))]);
+    expect(store.rows("items")).toHaveLength(1);
+  });
+
+  it("切り替えに失敗しても、書き込みの受け付けに戻る", async () => {
+    await expect(
+      store.whileWritesLocked(async () => {
+        throw new Error("通信できない");
+      }),
+    ).rejects.toThrow();
+    expect(store.writesLocked()).toBe(false);
+  });
+
+  it("古い版の写しの品目に checked_updated_at を足す", () => {
+    const db = openTestDatabase();
+    const old = new SqliteLocalStore(db);
+    old.commitNow([put(item())]);
+    db.exec("ALTER TABLE items DROP COLUMN checked_updated_at");
+    db.exec("PRAGMA user_version = 1");
+
+    expect(new SqliteLocalStore(db).rows("items")[0]?.checkedUpdatedAt).toBe(AT);
   });
 
   it("変わらなかった行は同じオブジェクトのまま返す", () => {

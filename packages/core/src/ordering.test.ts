@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLearnableTrip, kendallTau, learnCategoryOrder, masterOrder } from "./ordering.ts";
+import { hasLearnedOrder, isLearnableTrip, kendallTau, learnCategoryOrder, masterOrder } from "./ordering.ts";
 import { groupTrips, type CheckRecord, type Trip } from "./trips.ts";
 import type { Category, Id, StoreOrder } from "./types.ts";
 
@@ -123,6 +123,48 @@ function meanTau(
   }
   return total / seeds;
 }
+
+describe("hasLearnedOrder", () => {
+  const NOW = "2028-03-01T00:00:00.000Z";
+  const check = (id: string, categoryId: string, second: number) => ({
+    id,
+    storeId: "s1",
+    categoryId,
+    checkedAt: `2028-02-01T00:00:${String(second).padStart(2, "0")}.000Z`,
+  });
+  const trip = (checks: ReturnType<typeof check>[]) => ({
+    storeId: "s1",
+    startedAt: checks[0].checkedAt,
+    endedAt: checks[checks.length - 1].checkedAt,
+    checks,
+  });
+  const learnable = trip([check("a", "x", 0), check("b", "y", 10), check("c", "z", 20)]);
+
+  it("学習に使えるトリップか手の順番があれば学んだとする", () => {
+    expect(hasLearnedOrder({ storeId: "s1", trips: [learnable], manualOrder: null, now: NOW })).toBe(true);
+    expect(
+      hasLearnedOrder({
+        storeId: "s1",
+        trips: [],
+        manualOrder: { storeId: "s1", categoryIds: ["x"], editedAt: NOW },
+        now: NOW,
+      }),
+    ).toBe(true);
+  });
+
+  it("使えないトリップ、ほかの店舗の記録だけなら学んでいない", () => {
+    const short = trip([check("a", "x", 0), check("b", "y", 10)]);
+    expect(hasLearnedOrder({ storeId: "s1", trips: [short], manualOrder: null, now: NOW })).toBe(false);
+    expect(
+      hasLearnedOrder({
+        storeId: "s2",
+        trips: [learnable],
+        manualOrder: { storeId: "s1", categoryIds: ["x"], editedAt: NOW },
+        now: NOW,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("kendallTau", () => {
   it("同じ順は 1、逆は -1、順番に無い要素は比べない", () => {

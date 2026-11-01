@@ -17,6 +17,7 @@ const item: Item = {
   checked: true,
   checkedAt: AT,
   checkedStoreId: "store_1",
+  checkedUpdatedAt: AT,
   updatedAt: AT,
 };
 
@@ -100,7 +101,7 @@ describe("codec", () => {
     const cells = encodeRow("items", item);
     cells[4] = "unknown";
     cells[6] = "はい";
-    cells[9] = "昨日";
+    cells[10] = "昨日";
     const decoded = decodeRow("items", cells, 7);
 
     expect(decoded.kind).toBe("issue");
@@ -146,7 +147,7 @@ describe("schema", () => {
   it("範囲の文字列を作る", () => {
     expect(columnLetter(0)).toBe("A");
     expect(columnLetter(26)).toBe("AA");
-    expect(dataRange(TABLE_SHEETS.items)).toBe("Items!A2:K");
+    expect(dataRange(TABLE_SHEETS.items)).toBe("Items!A2:L");
     expect(dataRange(TABLE_SHEETS.history, 50)).toBe("History!A50:I");
   });
 });

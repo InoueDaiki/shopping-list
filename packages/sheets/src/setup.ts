@@ -1,9 +1,9 @@
 // スプレッドシートの作成と、作るときの batchUpdate の組み立て。
 
-import type { Category } from "@shopping-list/core";
+import { RemoteError, type Category } from "@shopping-list/core";
 
 import { rowData } from "./cells.ts";
-import type { Cell, SheetsClient, SheetsRequest } from "./client.ts";
+import type { Cell, SheetsClient, SheetsRequest, ValueRange } from "./client.ts";
 import { encodeRow } from "./codec.ts";
 import {
   ID_LIST_PATTERN,
@@ -14,8 +14,10 @@ import {
   SHEETS,
   TABLE_SHEETS,
   columnLetter,
+  headerRange,
   type Column,
   type SheetDef,
+  type SheetName,
 } from "./schema.ts";
 
 const CATEGORY_NAMES: readonly (readonly [string, string])[] = [
@@ -191,29 +193,153 @@ function protect(def: SheetDef): SheetsRequest {
   };
 }
 
+export type SheetIds = Record<SheetName, number>;
+
+export function assertSchemaVersion(range: ValueRange | undefined): void {
+  const version = range?.values?.[0]?.[0];
+  if (version !== SCHEMA_VERSION) {
+    throw new RemoteError(
+      "schema",
+      `スキーマの版が合わない: シート ${String(version)}、アプリ ${SCHEMA_VERSION}`,
+    );
+  }
+}
+
+export interface SpreadsheetSurvey {
+  // 足りないシートの名前。空ならアプリの形
+  missing: SheetName[];
+  // 今あるアプリのシートの番号
+  sheetIds: Partial<SheetIds>;
+  // アプリのシートも含む、すべてのシートの番号
+  allSheetIds: number[];
+}
+
+// シートの形を調べる。読むだけで何も書かない。アプリと同じ名前のシートが別の列や
+// 別の版なら、触らないよう RemoteError(schema)に原因を入れて投げる
+export async function surveySpreadsheet(
+  client: SheetsClient,
+  spreadsheetId: string,
+): Promise<SpreadsheetSurvey> {
+  const spreadsheet = await client.get(
+    spreadsheetId,
+    "spreadsheetId,sheets.properties(sheetId,title)",
+  );
+  const all = (spreadsheet.sheets ?? []).map(({ properties }) => properties);
+  const found = new Map(all.map(({ title, sheetId }) => [title, sheetId]));
+  const present = SHEETS.filter((def) => found.has(def.name));
+  const missing = SHEETS.filter((def) => !found.has(def.name)).map((def) => def.name);
+  const sheetIds = Object.fromEntries(
+    present.map((def) => [def.name, found.get(def.name) as number]),
+  ) as Partial<SheetIds>;
+  const allSheetIds = [...found.values()];
+  const hasMeta = found.has(META_SHEET.name);
+  const ranges = [...(hasMeta ? [`${META_SHEET.name}!A2`] : []), ...present.map(headerRange)];
+  if (ranges.length === 0) return { missing, sheetIds, allSheetIds };
+
+  const values = await client.batchGet(spreadsheetId, ranges);
+  const headers = hasMeta ? values.slice(1) : values;
+  const conflicts = present.filter((def, index) => {
+    const header = headers[index]?.values?.[0] ?? [];
+    return def.columns.some((column, i) => header[i] !== column.name);
+  });
+  if (conflicts.length > 0) {
+    const names = conflicts.map((def) => def.name).join("、");
+    throw new RemoteError("schema", `同じ名前で列の違うシートがある: ${names}`);
+  }
+  if (hasMeta) assertSchemaVersion(values[0]);
+  return { missing, sheetIds, allSheetIds };
+}
+
+// シートの番号が、今あるシートと重ならないようにする(既存のスプレッドシートに足すとき)
+function withFreeSheetIds(defs: readonly SheetDef[], used: readonly number[]): SheetDef[] {
+  const taken = new Set(used);
+  return defs.map((def) => {
+    let sheetId = def.sheetId;
+    while (taken.has(sheetId)) sheetId += 1000;
+    taken.add(sheetId);
+    return { ...def, sheetId };
+  });
+}
+
+// シートを足す要求。defaultSheetId は消してよい既定のシート(自分で作ったものだけ渡す)
+function buildAddRequests(
+  defs: readonly SheetDef[],
+  defaultSheetId: number | null,
+  categories: readonly Category[],
+): SheetsRequest[] {
+  const seeds = defs.flatMap((def): SheetsRequest[] => {
+    if (def.name === TABLE_SHEETS.categories.name) {
+      return [seed(def, categories.map((category) => encodeRow("categories", category)))];
+    }
+    return def.name === META_SHEET.name ? [seed(def, [[SCHEMA_VERSION]])] : [];
+  });
+  return [
+    ...defs.map(addSheet),
+    ...(defaultSheetId === null ? [] : [{ deleteSheet: { sheetId: defaultSheetId } }]),
+    ...defs.map(header),
+    ...seeds,
+    ...defs.flatMap(columnRequests),
+    ...defs.map(protect),
+  ];
+}
+
 // 作成直後の batchUpdate の要求。defaultSheetId は create が作った最初のシートで、最後に消す
 export function buildSetupRequests(
   defaultSheetId: number,
   categories: readonly Category[] = INITIAL_CATEGORIES,
 ): SheetsRequest[] {
-  return [
-    ...SHEETS.map(addSheet),
-    { deleteSheet: { sheetId: defaultSheetId } },
-    ...SHEETS.map(header),
-    seed(
-      TABLE_SHEETS.categories,
-      categories.map((category) => encodeRow("categories", category)),
+  return buildAddRequests(SHEETS, defaultSheetId, categories);
+}
+
+export interface EnsureOptions {
+  // 中身の無い、アプリが作った既定のシート。足し終えるときに消す。貼られたシートでは渡さない
+  defaultSheetId?: number;
+}
+
+// 足りないシートを足して初期化する。あるシートには触らない。1回の batchUpdate なので、
+// 全部足せるか何も変わらないかになり、失敗してももう一度呼べば続きになる
+export async function ensureSpreadsheet(
+  client: SheetsClient,
+  spreadsheetId: string,
+  options: EnsureOptions = {},
+): Promise<void> {
+  const { missing, allSheetIds } = await surveySpreadsheet(client, spreadsheetId);
+  if (missing.length === 0) return;
+  const defs = SHEETS.filter((def) => missing.includes(def.name));
+  const { defaultSheetId = null } = options;
+  const removable = defaultSheetId !== null && allSheetIds.includes(defaultSheetId);
+  await client.batchUpdate(
+    spreadsheetId,
+    buildAddRequests(
+      withFreeSheetIds(defs, allSheetIds),
+      removable ? defaultSheetId : null,
+      INITIAL_CATEGORIES,
     ),
-    seed(META_SHEET, [[SCHEMA_VERSION]]),
-    ...SHEETS.flatMap(columnRequests),
-    ...SHEETS.map(protect),
-  ];
+  );
 }
 
 export interface CreatedSpreadsheet {
   spreadsheetId: string;
   // もう1人に渡す URL
   spreadsheetUrl: string;
+  // 既定のシートの番号。初期化で消す
+  defaultSheetId: number;
+}
+
+// 空のスプレッドシートを作る。続きは ensureSpreadsheet で行う。呼び出し側が ID を
+// 保存してから続けると、途中で失敗しても空のシートを増やさない
+export async function beginSpreadsheet(
+  client: SheetsClient,
+  title: string,
+): Promise<CreatedSpreadsheet> {
+  const created = await client.create(title);
+  return {
+    spreadsheetId: created.spreadsheetId,
+    spreadsheetUrl:
+      created.spreadsheetUrl ??
+      `https://docs.google.com/spreadsheets/d/${created.spreadsheetId}/edit`,
+    defaultSheetId: created.sheets?.[0]?.properties.sheetId ?? 0,
+  };
 }
 
 // 1人目の初期化。シートを作り、規則と初期のカテゴリを入れる
@@ -221,13 +347,9 @@ export async function createSpreadsheet(
   client: SheetsClient,
   title: string,
 ): Promise<CreatedSpreadsheet> {
-  const created = await client.create(title);
-  const defaultSheetId = created.sheets?.[0]?.properties.sheetId ?? 0;
-  await client.batchUpdate(created.spreadsheetId, buildSetupRequests(defaultSheetId));
-  return {
-    spreadsheetId: created.spreadsheetId,
-    spreadsheetUrl:
-      created.spreadsheetUrl ??
-      `https://docs.google.com/spreadsheets/d/${created.spreadsheetId}/edit`,
-  };
+  const created = await beginSpreadsheet(client, title);
+  await ensureSpreadsheet(client, created.spreadsheetId, {
+    defaultSheetId: created.defaultSheetId,
+  });
+  return created;
 }

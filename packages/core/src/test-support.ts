@@ -18,6 +18,7 @@ export function itemFixture(overrides: Partial<Item> = {}): Item {
     checked: false,
     checkedAt: null,
     checkedStoreId: null,
+    checkedUpdatedAt: "2028-01-01T00:00:00.000Z",
     updatedAt: "2028-01-01T00:00:00.000Z",
     ...overrides,
   };

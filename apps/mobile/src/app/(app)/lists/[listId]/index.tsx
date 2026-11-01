@@ -1,6 +1,6 @@
 import type { Id, Item } from "@shopping-list/core";
 import { Badge, Button, cx, FullScreenMessage, Icon, Text } from "@shopping-list/ui-native";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import ArrowDownNarrowWide from "lucide-react-native/icons/arrow-down-narrow-wide";
 import ArrowUpNarrowWide from "lucide-react-native/icons/arrow-up-narrow-wide";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
@@ -14,7 +14,7 @@ import { MemoSheet } from "../../../../components/MemoSheet.tsx";
 import { StoreSheet } from "../../../../components/StoreSheet.tsx";
 import { SyncNoticeBar } from "../../../../components/SyncNoticeBar.tsx";
 import { useSections, useShopping, useTable } from "../../../../data/hooks.ts";
-import { repository } from "../../../../data/runtime.ts";
+import { repository, syncRunner } from "../../../../data/runtime.ts";
 import { categoryToneMap } from "../../../../logic/categoryTone.ts";
 import { listRows, type ListRow } from "../../../../logic/listRows.ts";
 
@@ -33,6 +33,14 @@ export default function ListScreen() {
   const names = useMemo(() => new Map(categories.map((row) => [row.id, row.name])), [categories]);
   const [memoItem, setMemoItem] = useState<Item | null>(null);
   const [storeOpen, setStoreOpen] = useState(false);
+
+  // 開いている間はもう1人の変更も読む
+  useFocusEffect(
+    useCallback(() => {
+      syncRunner.setViewingList(true);
+      return () => syncRunner.setViewingList(false);
+    }, []),
+  );
 
   const onToggle = useCallback((id: Id, checked: boolean) => {
     if (!checked) {
