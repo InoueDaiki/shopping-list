@@ -1,0 +1,5 @@
+/* デザインの検査(oxlint)がテーマを読むための入口。アプリの src/global.css と同じ import にする。
+   アプリのビルドには使わない。tailwindcss と uniwind を解決できるよう、apps/mobile に置く */
+@import "tailwindcss";
+@import "uniwind";
+@import "@shopping-list/design-tokens/theme.native.css";

@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // デザインシステムの検査(mise run lint の中の pnpm lint:design)。ルールの意図は packages/ui-native/README.md。
+  // 型の検査は tsc に任せ、ここではデザインの規則だけを見る(oxlint の組み込みの規則は使わない)
+  "categories": { "correctness": "off" },
+  "jsPlugins": ["eslint-plugin-better-tailwindcss", "./tools/oxlint/design.mjs"],
+  "ignorePatterns": ["**/generated/**", "**/uniwind-types.d.ts"],
+  "settings": {
+    "better-tailwindcss": {
+      // tailwindcss と uniwind は apps/mobile の依存にあるので、そこを起点にテーマを読む
+      "cwd": "apps/mobile",
+      "entryPoint": "design-lint.css",
+      // className と cx() のほかに、名前が Class / Classes で終わる変数の文字列も検査する
+      "variables": [["^(?:classNames?|.*Class(?:es)?)$", [{ "match": "strings" }, { "match": "objectValues" }]]]
+    }
+  },
+  "overrides": [
+    {
+      "files": ["apps/mobile/**/*.{ts,tsx}", "packages/ui-native/**/*.{ts,tsx}"],
+      "rules": {
+        // トークンにないクラス(bg-red-500 など Tailwind の既定の色を含む)。
+        // Uniwind の安全な領域のクラス(pb-safe、pt-safe-or-4 など)は Tailwind が知らないので除く
+        "better-tailwindcss/no-unknown-classes": [
+          "error",
+          { "ignore": ["^(?:[pm][xytrblse]?|inset|[xy]|top|bottom|left|right|start|end|h-screen)-safe(?:-or|-offset)?(?:-.+)?$"] }
+        ],
+        "better-tailwindcss/no-conflicting-classes": "error",
+        "better-tailwindcss/no-duplicate-classes": "error",
+        "better-tailwindcss/no-deprecated-classes": "error",
+        "better-tailwindcss/no-restricted-classes": [
+          "error",
+          {
+            "restrict": [
+              {
+                "pattern": "^(?:.*:)?(?:bg|text|border(?:-[trblxyse])?|ring|ring-offset|outline|fill|stroke|shadow|inset-shadow|accent|caret|decoration|divide|placeholder|from|via|to|rounded(?:-[trblse]{1,2})?|font)-\\[.+\\]$",
+                "message": "任意の値で色・角丸・書体を決めない。トークンの名前を使う(packages/design-tokens/generated/TOKENS.md)"
+              },
+              {
+                "pattern": "^(?:.*:)?dark:",
+                "message": "dark: は書かない。トークンが OS の設定で明暗を切り替える"
+              }
+            ]
+          }
+        ],
+        "design/no-raw-color": "error",
+        "design/no-style-color": "error"
+      }
+    }
+  ]
+}
