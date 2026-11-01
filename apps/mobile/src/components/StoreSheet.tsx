@@ -6,6 +6,7 @@ import { Pressable, View } from "react-native";
 import { useTable } from "../data/hooks.ts";
 import { watchPositionOnce } from "../data/location.ts";
 import { repository } from "../data/runtime.ts";
+import { refinedPosition } from "../logic/storePosition.ts";
 
 interface StoreSheetProps {
   open: boolean;
@@ -30,12 +31,15 @@ export function StoreSheet({ open, onClose }: StoreSheetProps) {
 
   const candidates = useMemo(
     () =>
-      storeCandidates({
-        stores,
-        position,
-        lastUsed: storeLastUsed([...history, ...checksFromItems(items)]),
-      }),
-    [stores, position, history, items],
+      // 閉じている間はチェックのたびに計算しない
+      open
+        ? storeCandidates({
+            stores,
+            position,
+            lastUsed: storeLastUsed([...history, ...checksFromItems(items)]),
+          })
+        : [],
+    [open, stores, position, history, items],
   );
 
   const select = (storeId: Id) => {
@@ -47,12 +51,11 @@ export function StoreSheet({ open, onClose }: StoreSheetProps) {
     if (name.trim() === "") return;
     const storeId = repository.addStore(name, position);
     select(storeId);
-    // 測り終える前に登録したら、分かったときに位置を足す
-    if (!position) {
-      void measuring.current.then((point) => {
-        if (point) repository.updateStore(storeId, point);
-      });
-    }
+    // 測り終える前に登録したら、分かったときに位置を足す。手元の位置は前回の場所のことがある
+    void measuring.current.then((point) => {
+      const refined = refinedPosition(position, point);
+      if (refined) repository.updateStore(storeId, refined);
+    });
   };
 
   return (

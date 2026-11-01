@@ -7,6 +7,7 @@ import { categoryToneMap } from "./categoryTone.ts";
 import { inviteLink, inviteMessage, parseInviteLink } from "./invite.ts";
 import { listRows } from "./listRows.ts";
 import { splitMemo } from "./memo.ts";
+import { refinedPosition } from "./storePosition.ts";
 import { moveInOrder } from "./moveInOrder.ts";
 import { syncNotice } from "./syncNotice.ts";
 
@@ -32,6 +33,21 @@ describe("listRows", () => {
 
   it("チェック済みが無ければ見出しを出さない", () => {
     expect(listRows({ unchecked: [], checked: [] })).toEqual([]);
+  });
+});
+
+describe("refinedPosition", () => {
+  const home = { lat: 1, lng: 2 };
+  const shop = { lat: 3, lng: 4 };
+
+  it("前回の場所で登録しても、測れたら置き換える", () => {
+    expect(refinedPosition(home, shop)).toEqual(shop);
+    expect(refinedPosition(null, shop)).toEqual(shop);
+  });
+
+  it("測れないか同じ位置なら書かない", () => {
+    expect(refinedPosition(home, null)).toBeNull();
+    expect(refinedPosition(shop, { ...shop })).toBeNull();
   });
 });
 
