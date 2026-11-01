@@ -1,8 +1,8 @@
 import { frequentItems, itemSuggestions, lookupCategory, type Id, type Item } from "@shopping-list/core";
 import { Button, Chip, cx, Input, PageHeader, Text } from "@shopping-list/ui-native";
 import { useLocalSearchParams } from "expo-router";
-import { useDeferredValue, useMemo, useRef, useState } from "react";
-import { Pressable, type TextInput, View } from "react-native";
+import { useDeferredValue, useMemo, useState } from "react";
+import { Pressable, View } from "react-native";
 
 import { CategorySheet } from "../../../../components/CategorySheet.tsx";
 import { Page } from "../../../../components/Page.tsx";
@@ -17,7 +17,6 @@ export default function AddItem() {
   const [name, setName] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [uncategorized, setUncategorized] = useState<Item | null>(null);
-  const input = useRef<TextInput>(null);
   const query = useDeferredValue(name);
 
   const now = useMemo(() => new Date().toISOString(), [history]);
@@ -36,7 +35,6 @@ export default function AddItem() {
     setName("");
     setNotice(item ? `「${item.name}」を追加しました` : itemName.trim() === "" ? null : "すでにリストにあります");
     if (item && item.categoryId === null) setUncategorized(item);
-    else input.current?.focus();
   };
 
   return (
@@ -44,7 +42,6 @@ export default function AddItem() {
       <PageHeader title="品目を追加" />
       <View className="flex-row items-center gap-2">
         <Input
-          ref={input}
           className="min-w-0 flex-1"
           autoFocus
           accessibilityLabel="品目の名前"

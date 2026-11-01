@@ -123,9 +123,11 @@ export class SyncRunner {
       });
       this.#deps.afterSync?.();
       if (result.status === "deferred") this.#schedule(DEFERRED_SYNC_DELAY_MS);
-      else if (result.status === "ok" && this.#deps.pendingCount() > 0) this.#schedule(WRITE_SYNC_DELAY_MS);
+      // 同期の途中に足された分だけ送り直す。拒否されて隔離された操作は残り続けるので、数に含めない
+      else if (result.status === "ok" && this.#deps.pendingCount() > result.pending) this.#schedule(WRITE_SYNC_DELAY_MS);
     } catch (error) {
-      console.warn("同期できなかった", error);
+      // シート ID を含むかもしれないので、本文は出さない
+      console.warn("同期できなかった", error instanceof Error ? error.name : "unknown");
       this.#set({
         running: false,
         lastStatus: "failed",

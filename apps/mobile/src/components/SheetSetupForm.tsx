@@ -21,7 +21,6 @@ export function SheetSetupForm({ onDone }: { onDone?: () => void }) {
       await connectSheet(await task());
       onDone?.();
     } catch (e) {
-      console.info("シートを開けなかった", e);
       setError(sheetErrorMessage(e, input));
       setBusy(null);
     }
@@ -41,7 +40,7 @@ export function SheetSetupForm({ onDone }: { onDone?: () => void }) {
       </Card>
       <Card className="gap-3">
         <Text className="font-bold">すでにあるシートを使う</Text>
-        <Field label="スプレッドシートの URL" hint="一緒に使う人が作ったシートの URL を貼ります">
+        <Field label="スプレッドシートの URL" hint="一緒に使う人から届いたシートの URL か、招待リンクを貼ります">
           <Input
             value={url}
             onChangeText={setUrl}

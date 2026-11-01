@@ -22,10 +22,15 @@ const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     sql: `
-      CREATE TABLE lists (id TEXT PRIMARY KEY, name TEXT NOT NULL, sort REAL NOT NULL);
-      CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT NOT NULL, sort REAL NOT NULL);
+      CREATE TABLE lists (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, sort REAL NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE categories (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, sort REAL NOT NULL, updated_at TEXT NOT NULL
+      );
       CREATE TABLE stores (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, lat REAL, lng REAL, created_at TEXT NOT NULL
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, lat REAL, lng REAL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
       CREATE TABLE items (
         id TEXT PRIMARY KEY, list_id TEXT NOT NULL, name TEXT NOT NULL,
@@ -37,7 +42,7 @@ const MIGRATIONS: readonly Migration[] = [
       );
       CREATE TABLE history (
         id TEXT PRIMARY KEY, list_id TEXT NOT NULL, name TEXT NOT NULL,
-        category_id TEXT, store_id TEXT, trip_id TEXT,
+        category_id TEXT, category_source TEXT, store_id TEXT, trip_id TEXT,
         checked_at TEXT NOT NULL, checked_seq INTEGER NOT NULL
       );
       CREATE TABLE pending_ops (

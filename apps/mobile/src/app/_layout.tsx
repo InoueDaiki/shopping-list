@@ -11,7 +11,7 @@ import { Uniwind } from "uniwind";
 
 import { useAuth } from "../auth.ts";
 import { config } from "../config.ts";
-import { useSheet } from "../data/hooks.ts";
+import { usePendingInvite, useSheet } from "../data/hooks.ts";
 
 export default function RootLayout() {
   return (
@@ -28,14 +28,17 @@ export default function RootLayout() {
 function Root() {
   const auth = useAuth();
   const sheet = useSheet();
+  const invite = usePendingInvite();
   const canvas = useTokenColor("canvas");
   const loading = auth.status === "loading";
   if (!config.demo && loading && !sheet) {
     return <View className="flex-1 bg-canvas" />;
   }
   const signedIn = auth.status === "signedIn" || loading;
-  const app = config.demo || (signedIn && sheet !== null);
-  const setup = !config.demo && signedIn && sheet === null;
+  // 招待の確認はログインの後に出す
+  const join = !config.demo && auth.status === "signedIn" && invite !== null;
+  const app = !join && (config.demo || (signedIn && sheet !== null));
+  const setup = !join && !config.demo && signedIn && sheet === null;
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
       <Stack.Protected guard={app}>
@@ -44,7 +47,10 @@ function Root() {
       <Stack.Protected guard={setup}>
         <Stack.Screen name="setup" />
       </Stack.Protected>
-      <Stack.Protected guard={!app && !setup}>
+      <Stack.Protected guard={join}>
+        <Stack.Screen name="join" />
+      </Stack.Protected>
+      <Stack.Protected guard={!app && !setup && !join}>
         <Stack.Screen name="sign-in" />
       </Stack.Protected>
     </Stack>

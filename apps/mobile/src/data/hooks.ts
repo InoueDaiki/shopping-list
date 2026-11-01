@@ -4,7 +4,7 @@ import { sectionItems, type Id, type ListDirection, type SyncTable, type TableRo
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import { SESSION_KEY } from "./repository.ts";
-import { localStore, orderForStore, repository, SHEET_KEY, syncRunner } from "./runtime.ts";
+import { INVITE_KEY, localStore, orderForStore, repository, SHEET_KEY, syncRunner } from "./runtime.ts";
 import { activeSession } from "./shopping.ts";
 import type { SheetRef } from "./spreadsheet.ts";
 import type { SyncStatus } from "./syncRunner.ts";
@@ -31,6 +31,10 @@ function useSetting(key: string): string | null {
 export function useSheet(): SheetRef | null {
   const stored = useSetting(SHEET_KEY);
   return useMemo(() => (stored === null ? null : (JSON.parse(stored) as SheetRef)), [stored]);
+}
+
+export function usePendingInvite(): string | null {
+  return useSetting(INVITE_KEY);
 }
 
 export function useSyncStatus(): SyncStatus {

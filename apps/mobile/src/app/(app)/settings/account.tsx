@@ -4,11 +4,10 @@ import { useState } from "react";
 
 import { useAuth } from "../../../auth.ts";
 import { Page } from "../../../components/Page.tsx";
+import { useLeaveSheetGuard } from "../../../components/useLeaveSheetGuard.ts";
 import { config } from "../../../config.ts";
 import { usePendingCount, useSheet, useSyncStatus } from "../../../data/hooks.ts";
-import { localStore, signOutAndWipe, syncRunner } from "../../../data/runtime.ts";
-
-type Confirm = "switch" | "signOut" | null;
+import { signOutAndWipe } from "../../../data/runtime.ts";
 
 // アカウントとシート
 export default function Account() {
@@ -16,23 +15,16 @@ export default function Account() {
   const sheet = useSheet();
   const pending = usePendingCount();
   const { issues } = useSyncStatus();
-  const [confirm, setConfirm] = useState<Confirm>(null);
-  const [busy, setBusy] = useState(false);
+  const leave = useLeaveSheetGuard();
+  const [action, setAction] = useState<"switch" | "signOut">("switch");
 
-  const proceed = (action: Exclude<Confirm, null>) => {
-    if (action === "switch") router.push("/settings/switch-sheet");
-    else void signOutAndWipe();
+  const switchSheet = () => {
+    setAction("switch");
+    void leave.guard(() => router.push("/settings/switch-sheet"));
   };
-
-  // 未送信があれば、まず送ってみる。それでも残れば確かめる(切り替えとログアウトでは端末から消える)
-  const start = async (action: Exclude<Confirm, null>) => {
-    if (localStore.pendingCountNow() > 0) {
-      setBusy(true);
-      await syncRunner.syncNow();
-      setBusy(false);
-    }
-    if (localStore.pendingCountNow() > 0) setConfirm(action);
-    else proceed(action);
+  const signOut = () => {
+    setAction("signOut");
+    void leave.guard(() => void signOutAndWipe());
   };
 
   if (config.demo) {
@@ -58,28 +50,28 @@ export default function Account() {
         </Text>
         <Text className="text-xs text-fg-muted">{pending > 0 ? `未送信 ${pending} 件` : "送信待ちはありません"}</Text>
       </Card>
-      {issues.length > 0 && <Alert tone="warning">{`シートの ${issues.length} 行を読み取れませんでした(${issues[0]?.table}、${issues[0]?.row} 行目など)。`}</Alert>}
-      <Button disabled={busy} onPress={() => void start("switch")}>
+      {issues.length > 0 && (
+        <Alert tone="warning">{`シートの ${issues.length} 行を読み取れませんでした(${issues[0]?.table}、${issues[0]?.row} 行目など)。`}</Alert>
+      )}
+      <Button onPress={() => router.push("/settings/invite")}>招待する</Button>
+      <Button disabled={leave.busy} onPress={switchSheet}>
         別のシートに切り替える
       </Button>
-      <Button variant="ghost" disabled={busy} onPress={() => void start("signOut")}>
+      <Button variant="ghost" disabled={leave.busy} onPress={signOut}>
         ログアウト
       </Button>
       <ConfirmDialog
-        open={confirm !== null}
+        open={leave.confirming}
         tone="danger"
         title={`未送信の変更が ${pending} 件あります`}
         description={
-          confirm === "switch"
+          action === "switch"
             ? "シートを切り替えると、まだ送っていない変更はこの端末から消え、元に戻せません。"
             : "ログアウトすると、まだ送っていない変更はこの端末から消え、元に戻せません。"
         }
-        confirmLabel={confirm === "switch" ? "消して切り替える" : "消してログアウト"}
-        onConfirm={() => {
-          if (confirm) proceed(confirm);
-          setConfirm(null);
-        }}
-        onCancel={() => setConfirm(null)}
+        confirmLabel={action === "switch" ? "消して切り替える" : "消してログアウト"}
+        onConfirm={leave.confirm}
+        onCancel={leave.cancel}
       />
     </Page>
   );

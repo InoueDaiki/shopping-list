@@ -35,11 +35,16 @@ interface TableDef<T> {
 }
 
 const namedSorted = {
-  columns: ["id", "name", "sort"],
+  columns: ["id", "name", "sort", "updated_at"],
   key: "id",
   orderBy: "sort, id",
-  encode: (row: ShoppingList | Category) => [row.id, row.name, row.sort],
-  decode: (row: Row) => ({ id: row.id as Id, name: row.name as string, sort: row.sort as number }),
+  encode: (row: ShoppingList | Category) => [row.id, row.name, row.sort, row.updatedAt],
+  decode: (row: Row) => ({
+    id: row.id as Id,
+    name: row.name as string,
+    sort: row.sort as number,
+    updatedAt: row.updated_at as string,
+  }),
 };
 
 const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
@@ -48,15 +53,16 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
   stores: {
     name: "stores",
     key: "id",
-    columns: ["id", "name", "lat", "lng", "created_at"],
+    columns: ["id", "name", "lat", "lng", "created_at", "updated_at"],
     orderBy: "created_at, id",
-    encode: (row: Store) => [row.id, row.name, row.lat, row.lng, row.createdAt],
+    encode: (row: Store) => [row.id, row.name, row.lat, row.lng, row.createdAt, row.updatedAt],
     decode: (row) => ({
       id: row.id as Id,
       name: row.name as string,
       lat: row.lat as number | null,
       lng: row.lng as number | null,
       createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string,
     }),
   },
   items: {
@@ -115,13 +121,14 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
   history: {
     name: "history",
     key: "id",
-    columns: ["id", "list_id", "name", "category_id", "store_id", "trip_id", "checked_at", "checked_seq"],
+    columns: ["id", "list_id", "name", "category_id", "category_source", "store_id", "trip_id", "checked_at", "checked_seq"],
     orderBy: "checked_at, checked_seq, id",
     encode: (row: HistoryEntry) => [
       row.id,
       row.listId,
       row.name,
       row.categoryId,
+      row.categorySource,
       row.storeId,
       row.tripId,
       row.checkedAt,
@@ -132,6 +139,7 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
       listId: row.list_id as Id,
       name: row.name as string,
       categoryId: row.category_id as Id | null,
+      categorySource: row.category_source as HistoryEntry["categorySource"],
       storeId: row.store_id as Id | null,
       tripId: row.trip_id as Id | null,
       checkedAt: row.checked_at as string,

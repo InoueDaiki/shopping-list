@@ -256,6 +256,14 @@ describe("auth", () => {
       expect(mocks.refreshAsync).not.toHaveBeenCalled();
     });
 
+    it("forceRefresh なら、期限が遠くても更新する", async () => {
+      seed();
+      const { TokenResponse } = await import("expo-auth-session");
+      mocks.refreshAsync.mockResolvedValue(new TokenResponse({ accessToken: "fresh-next" }));
+      const { getAccessToken } = await load();
+      await expect(getAccessToken({ forceRefresh: true })).resolves.toBe("fresh-next");
+    });
+
     it("ログインしていなければ LoginRequiredError を投げる", async () => {
       const { getAccessToken } = await import("./auth.ts");
       await expect(getAccessToken()).rejects.toMatchObject({ name: "LoginRequiredError" });

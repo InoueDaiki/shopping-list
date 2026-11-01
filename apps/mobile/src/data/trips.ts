@@ -2,55 +2,51 @@
 import {
   checksFromItems,
   groupTrips,
+  historyEntriesFromTrip,
   isTripFinished,
   TRIP_GAP_MS,
   type HistoryEntry,
-  type Id,
   type Iso,
   type Item,
   type LocalChange,
 } from "@shopping-list/core";
 
-const MAX_ID_LENGTH = 64;
-
-// 2台が同じトリップを同時に移しても、ローカルで1行に重なるよう、乱数でなく品目から作る
-function derivedId(prefix: string, id: Id): Id {
-  return `${prefix}${id}`.slice(0, MAX_ID_LENGTH);
-}
-
-function toHistory(item: Item, storeId: Id | null, tripId: Id | null, seq: number): HistoryEntry {
-  return {
-    id: derivedId("h_", item.id),
-    listId: item.listId,
-    name: item.name,
-    categoryId: item.categoryId,
-    storeId,
-    tripId,
-    checkedAt: item.checkedAt as Iso,
-    checkedSeq: seq,
-  };
-}
-
-// 終わったトリップの品目を History に足し、Items から消す変更を返す。
-// 店舗の無いチェックはトリップにならないので、同じ時間が過ぎたら1件ずつ移す(学習には使われない)
-export function finishedTripChanges(items: readonly Item[], now: Iso): LocalChange[] {
-  const byId = new Map(items.map((item) => [item.id, item]));
-  const changes: LocalChange[] = [];
-  const move = (item: Item, storeId: Id | null, tripId: Id | null, seq: number) => {
-    changes.push({ action: "put", table: "history", row: toHistory(item, storeId, tripId, seq) });
-    changes.push({ action: "delete", table: "items", id: item.id, at: now });
-  };
-
-  for (const trip of groupTrips(checksFromItems(items))) {
-    if (!isTripFinished(trip, now)) continue;
-    const tripId = derivedId("t_", trip.checks[0].id);
-    trip.checks.forEach((check, seq) => move(byId.get(check.id) as Item, trip.storeId, tripId, seq));
-  }
-
+// 店舗の無いチェックはトリップにならない。同じ時間が過ぎたら移す(学習には使われない)。
+// ID は core と同じく品目の ID にして、2台が同時に移しても読むときに重なるようにする
+function storelessEntries(items: readonly Item[], now: Iso): HistoryEntry[] {
   const nowMs = Date.parse(now);
-  for (const item of items) {
-    if (!item.checked || item.checkedAt === null || item.checkedStoreId !== null) continue;
-    if (nowMs - Date.parse(item.checkedAt) > TRIP_GAP_MS) move(item, null, null, 0);
-  }
-  return changes;
+  return items
+    .filter(
+      (item) =>
+        item.checked &&
+        item.checkedAt !== null &&
+        item.checkedStoreId === null &&
+        nowMs - Date.parse(item.checkedAt) > TRIP_GAP_MS,
+    )
+    .sort((a, b) => Date.parse(a.checkedAt as Iso) - Date.parse(b.checkedAt as Iso))
+    .map((item, checkedSeq) => ({
+      id: item.id,
+      listId: item.listId,
+      name: item.name,
+      categoryId: item.categoryId,
+      categorySource: item.categorySource,
+      storeId: null,
+      tripId: null,
+      checkedAt: item.checkedAt as Iso,
+      checkedSeq,
+    }));
+}
+
+// 終わった品目を History に足し、Items から消す変更を返す
+export function finishedTripChanges(items: readonly Item[], now: Iso): LocalChange[] {
+  const entries = [
+    ...groupTrips(checksFromItems(items))
+      .filter((trip) => isTripFinished(trip, now))
+      .flatMap((trip) => historyEntriesFromTrip(trip, items)),
+    ...storelessEntries(items, now),
+  ];
+  return entries.flatMap((row): LocalChange[] => [
+    { action: "put", table: "history", row },
+    { action: "delete", table: "items", id: row.id, at: now },
+  ]);
 }

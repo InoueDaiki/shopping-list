@@ -45,6 +45,7 @@ export function seedDemo({ store, repository, categories, newId, now }: SeedInpu
         listId,
         name,
         categoryId: category(categoryName),
+        categorySource: "history",
         storeId: null,
         tripId: null,
         checkedAt: new Date(now.getTime() - (index + 1) * DAY_MS).toISOString(),

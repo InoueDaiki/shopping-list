@@ -15,6 +15,8 @@ import type { SheetRef } from "./spreadsheet.ts";
 import { SyncRunner } from "./syncRunner.ts";
 
 export const SHEET_KEY = "spreadsheet";
+// 開かれた招待リンクのシート ID。ログインと確認が終わるまで持つ
+export const INVITE_KEY = "pendingInvite";
 
 const nowIso = () => new Date().toISOString();
 
@@ -80,6 +82,14 @@ if (config.demo) {
   localStore.subscribe("pending", () => {
     if (localStore.pendingCountNow() > 0) syncRunner.notifyWrite();
   });
+}
+
+export function rememberInvite(spreadsheetId: string): void {
+  localStore.setSetting(INVITE_KEY, spreadsheetId);
+}
+
+export function forgetInvite(): void {
+  localStore.setSetting(INVITE_KEY, null);
 }
 
 // シートを決める、または替える。端末の写しを捨ててから読み直す(送信待ちも消える)

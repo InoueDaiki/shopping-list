@@ -79,7 +79,8 @@ export default function Categories() {
       />
       <ActionSheet
         open={target !== null}
-        onClose={() => setTarget(null)}
+        title={target?.name ?? ""}
+        onCancel={() => setTarget(null)}
         items={[
           { label: "名前を変える", onPress: () => setRenaming(target) },
           { label: "削除する", tone: "danger", onPress: () => setDeleting(target) },

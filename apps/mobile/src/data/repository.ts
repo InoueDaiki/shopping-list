@@ -49,13 +49,13 @@ export class Repository {
   addList(name: string): Id {
     const id = this.#newId();
     const sort = nextSort(this.#store.rows("lists"));
-    this.#store.commitNow([{ action: "put", table: "lists", row: { id, name: name.trim(), sort } }]);
+    this.#store.commitNow([{ action: "put", table: "lists", row: { id, name: name.trim(), sort, updatedAt: this.#now() } }]);
     return id;
   }
 
   renameList(id: Id, name: string): void {
     const list = this.#store.rows("lists").find((row) => row.id === id);
-    if (list) this.#store.commitNow([{ action: "put", table: "lists", row: { ...list, name: name.trim() } }]);
+    if (list) this.#store.commitNow([{ action: "put", table: "lists", row: { ...list, name: name.trim(), updatedAt: this.#now() } }]);
   }
 
   // 品目も一緒に消す。History は足すだけなので残す
@@ -190,6 +190,7 @@ export class Repository {
       lat: position?.lat ?? null,
       lng: position?.lng ?? null,
       createdAt: this.#now(),
+      updatedAt: this.#now(),
     };
     this.#store.commitNow([{ action: "put", table: "stores", row: store }]);
     return store.id;
@@ -197,7 +198,7 @@ export class Repository {
 
   updateStore(id: Id, patch: Partial<Pick<Store, "name" | "lat" | "lng">>): void {
     const store = this.#store.rows("stores").find((row) => row.id === id);
-    if (store) this.#store.commitNow([{ action: "put", table: "stores", row: { ...store, ...patch } }]);
+    if (store) this.#store.commitNow([{ action: "put", table: "stores", row: { ...store, ...patch, updatedAt: this.#now() } }]);
   }
 
   // 品目の参照と手の順番も外す(シートのプルダウンの参照先が無くならないように)。History は残す
@@ -224,13 +225,13 @@ export class Repository {
   addCategory(name: string): Id {
     const id = this.#newId();
     const sort = nextSort(this.#store.rows("categories"));
-    this.#store.commitNow([{ action: "put", table: "categories", row: { id, name: name.trim(), sort } }]);
+    this.#store.commitNow([{ action: "put", table: "categories", row: { id, name: name.trim(), sort, updatedAt: this.#now() } }]);
     return id;
   }
 
   renameCategory(id: Id, name: string): void {
     const category = this.#store.rows("categories").find((row) => row.id === id);
-    if (category) this.#store.commitNow([{ action: "put", table: "categories", row: { ...category, name: name.trim() } }]);
+    if (category) this.#store.commitNow([{ action: "put", table: "categories", row: { ...category, name: name.trim(), updatedAt: this.#now() } }]);
   }
 
   // 隣と sort を入れ替える
@@ -240,9 +241,10 @@ export class Repository {
     const other = categories[index + offset];
     if (index < 0 || !other) return;
     const current = categories[index];
+    const updatedAt = this.#now();
     this.#store.commitNow([
-      { action: "put", table: "categories", row: { ...current, sort: other.sort } },
-      { action: "put", table: "categories", row: { ...other, sort: current.sort } },
+      { action: "put", table: "categories", row: { ...current, sort: other.sort, updatedAt } },
+      { action: "put", table: "categories", row: { ...other, sort: current.sort, updatedAt } },
     ]);
   }
 

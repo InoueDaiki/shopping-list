@@ -5,7 +5,8 @@ export interface MemoPart {
   url: boolean;
 }
 
-const URL_RE = /https?:\/\/[^\s]+/g;
+// URL は ASCII の文字まで(日本語の文が続いても URL に含めない)
+const URL_RE = /https?:\/\/[\x21-\x7e]+/g;
 // 文の終わりの句読点は URL に含めない
 const TRAILING_RE = /[、。,.!?!?))」』]+$/;
 
