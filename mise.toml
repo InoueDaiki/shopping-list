@@ -3,8 +3,8 @@
 [tools]
 node = "24.21.0"
 pnpm = "12.10.1"
-# Android のビルド(Gradle)。Android SDK は Android Studio が入れたものを使う
-java = { version = "temurin-17.0.14+7", os = ["macos"] }
+# Android のビルド(Gradle)。Android SDK はホストでは Android Studio が入れたもの、CI ではランナーのものを使う
+java = "temurin-17.0.14+7"
 
 [env]
 _.file = { path = ".env", tools = false }
@@ -33,3 +33,14 @@ run = "pnpm --dir apps/mobile start"
 description = "モバイル版を Android 向けにビルドして入れる(エミュレーターか実機)"
 env = { ANDROID_HOME = "{{env.HOME}}/Library/Android/sdk" }
 run = "pnpm --dir apps/mobile exec expo run:android"
+
+[tasks."build:android"]
+description = "配布用のリリース APK をビルドする。署名は .env の ANDROID_KEYSTORE_PATH など(README の「配布」)"
+# ANDROID_HOME が無ければ Android Studio の場所を使う(CI のランナーには入っている)
+env = { ANDROID_HOME = "{{ get_env(name='ANDROID_HOME', default=env.HOME ~ '/Library/Android/sdk') }}", EXPO_NO_GIT_STATUS = "1" }
+run = [
+  # android/ はコミットしない。設定を消したときに古い分が残らないよう、毎回作り直す
+  "pnpm --dir apps/mobile exec expo prebuild --platform android --no-install --clean",
+  "cd apps/mobile/android && ./gradlew assembleRelease",
+  "ls -l apps/mobile/android/app/build/outputs/apk/release/app-release.apk",
+]

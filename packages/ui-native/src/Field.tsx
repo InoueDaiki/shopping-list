@@ -1,4 +1,5 @@
-import { Check, ChevronDown } from "lucide-react-native";
+import Check from "lucide-react-native/icons/check";
+import ChevronDown from "lucide-react-native/icons/chevron-down";
 import { createContext, type ReactNode, use, useState } from "react";
 import { FlatList, Modal, Pressable, TextInput, type TextInputProps, View } from "react-native";
 

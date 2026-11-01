@@ -4,6 +4,16 @@
   "private": true,
   "description": "モバイル版(React Native。Expo の開発ビルドと Expo Router)",
   "main": "expo-router/entry",
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "@react-native-masked-view/masked-view",
+        "react-native-gesture-handler",
+        "react-native-reanimated",
+        "react-native-worklets"
+      ]
+    }
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -17,6 +27,7 @@
     "@shopping-list/ui-native": "workspace:*",
     "expo": "58.0.21",
     "expo-auth-session": "~58.0.16",
+    "expo-build-properties": "~58.0.12",
     "expo-constants": "~58.0.14",
     "expo-crypto": "~58.0.7",
     "expo-linking": "~58.0.15",

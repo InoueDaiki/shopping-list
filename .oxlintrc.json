@@ -43,7 +43,20 @@
           }
         ],
         "design/no-raw-color": "error",
-        "design/no-style-color": "error"
+        "design/no-style-color": "error",
+        // 入口から import すると全部のアイコンがバンドルに入る
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "lucide-react-native",
+                "allowTypeImports": true,
+                "message": "アイコンは lucide-react-native/icons/<名前> から1つずつ import する(全部の約1900個がバンドルに入るため)"
+              }
+            ]
+          }
+        ]
       }
     }
   ]
