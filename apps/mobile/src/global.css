@@ -1,0 +1,7 @@
+/* モバイル版の CSS の入口(Uniwind)。色・角丸はトークン(design-tokens)からだけ来る。ここで色を足さない */
+@import "tailwindcss";
+@import "uniwind";
+@import "@shopping-list/design-tokens/theme.native.css";
+
+/* 部品のクラスも拾う(アプリの外にあるので、自動では探されない) */
+@source "../../../packages/ui-native/src";

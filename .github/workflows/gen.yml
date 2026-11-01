@@ -1,0 +1,38 @@
+# 生成物(packages/design-tokens/generated)がコミットされたものと一致するかを確かめる
+name: 生成物
+
+on:
+  pull_request:
+    paths: &paths
+      - packages/design-tokens/**
+      - mise.toml
+      - .github/workflows/gen.yml
+  push:
+    branches: [main]
+    paths: *paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+  MISE_DISABLE_TOOLS: java
+
+jobs:
+  gen:
+    name: 生成物が最新か
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          mise-cache-prefix: mise-v1-gen
+      - run: mise run gen
+      - run: git diff --exit-code
