@@ -80,8 +80,10 @@ export function useOrder(storeId: Id | null): readonly Id[] {
   return useMemo(() => orderForStore(storeId), [categories, history, storeOrders, storeId]);
 }
 
-export function useSections(listId: Id, storeId: Id | null, direction: ListDirection) {
-  const items = useListItems(listId);
+// hiddenId は消す途中(取り消せる間)の品目で、一覧に出さない
+export function useSections(listId: Id, storeId: Id | null, direction: ListDirection, hiddenId: Id | null = null) {
+  const listItems = useListItems(listId);
+  const items = useMemo(() => (hiddenId === null ? listItems : listItems.filter((item) => item.id !== hiddenId)), [listItems, hiddenId]);
   const order = useOrder(storeId);
   return useMemo(() => sectionItems({ items, order, direction }), [items, order, direction]);
 }

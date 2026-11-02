@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AddItemBar } from "../../../../components/AddItemBar.tsx";
 import { ItemRow } from "../../../../components/ItemRow.tsx";
+import { usePendingDelete } from "../../../../components/usePendingDelete.ts";
 import { MemoSheet } from "../../../../components/MemoSheet.tsx";
 import { StoreSheet } from "../../../../components/StoreSheet.tsx";
 import { SyncNoticeBar } from "../../../../components/SyncNoticeBar.tsx";
@@ -33,7 +34,8 @@ export default function ListScreen() {
   const session = useShopping(listId);
   const storeId = session?.storeId ?? null;
   const direction = session?.direction.direction ?? "asc";
-  const sections = useSections(listId, storeId, direction);
+  const { pending, hiddenId, remove, undo } = usePendingDelete();
+  const sections = useSections(listId, storeId, direction, hiddenId);
   const rows = useMemo(() => listRows(sections), [sections]);
   const tones = useMemo(() => categoryToneMap(categories), [categories]);
   const names = useMemo(() => new Map(categories.map((row) => [row.id, row.name])), [categories]);
@@ -63,7 +65,7 @@ export default function ListScreen() {
   const renderItem = useCallback(
     ({ item: row }: { item: ListRow }) => {
       if (row.kind === "item") {
-        return <ItemRow item={row.item} highlighted={row.item.id === highlightId} onToggle={onToggle} onMemo={setMemoItem} onEdit={onEdit} />;
+        return <ItemRow item={row.item} highlighted={row.item.id === highlightId} onToggle={onToggle} onMemo={setMemoItem} onEdit={onEdit} onDelete={remove} />;
       }
       if (row.kind === "checkedHeader") {
         return <Text className="px-4 pt-6 pb-1 text-sm font-medium text-fg-muted">{`チェック済み ${row.count}`}</Text>;
@@ -76,7 +78,7 @@ export default function ListScreen() {
         </View>
       );
     },
-    [names, tones, highlightId, onToggle, onEdit],
+    [names, tones, highlightId, onToggle, onEdit, remove],
   );
 
   const list = lists.find((row) => row.id === listId);
@@ -122,6 +124,14 @@ export default function ListScreen() {
         ListHeaderComponent={<SyncNoticeBar className="mx-4 mt-2" />}
         ListEmptyComponent={<Text className="py-12 text-center text-fg-muted">品目がありません。下の入力欄から追加してください。</Text>}
       />
+      {pending && (
+        <View accessibilityLiveRegion="polite" className="mx-4 mb-2 flex-row items-center gap-2 rounded-lg border border-border bg-surface-strong py-1 pr-1 pl-4">
+          <Text numberOfLines={1} className="min-w-0 flex-1 text-sm">{`「${pending.name}」を削除しました`}</Text>
+          <Button variant="link" onPress={undo}>
+            元に戻す
+          </Button>
+        </View>
+      )}
       <View className="gap-2 border-t border-border bg-surface px-4 pt-2 pb-safe-or-3">
         <View className="flex-row items-center gap-2">
           <Pressable

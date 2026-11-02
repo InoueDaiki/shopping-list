@@ -49,6 +49,21 @@ appId: io.github.inouedaiki.shoppinglist
 - tapOn: ヨーグルト
 - assertVisible: ヨーグルト
 
+# 払って消すと少しの間だけ取り消せる。取り消さなければ消える
+- swipe:
+    from: にんじん
+    direction: LEFT
+- assertVisible: 「にんじん」を削除しました
+- tapOn: 元に戻す
+- assertVisible: にんじん
+- swipe:
+    from: にんじん
+    direction: LEFT
+- extendedWaitUntil:
+    notVisible: 「にんじん」を削除しました
+    timeout: 10000
+- assertNotVisible: にんじん
+
 # トリップの最初のチェックで店舗を聞かれ、その場で登録する
 - tapOn: 牛乳
 - assertVisible: どの店舗で買いますか
