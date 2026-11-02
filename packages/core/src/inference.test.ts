@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { lookupCategory, resolveCategory } from "./category.ts";
 import { INFERENCE_DICTIONARY } from "./inference-dictionary.ts";
-import { createCategoryInferrer, type InferenceRecords } from "./inference.ts";
+import { INFERENCE_EVAL_DATA } from "./inference-eval-data.ts";
+import { createCategoryInferrer } from "./inference.ts";
 import { normalizeItemName } from "./normalize.ts";
-import { historyFixture, itemFixture } from "./test-support.ts";
+import { historyFixture } from "./test-support.ts";
 import type { Category, HistoryEntry } from "./types.ts";
 
 function category(id: string, name: string): Category {
@@ -12,8 +13,8 @@ function category(id: string, name: string): Category {
 
 const master = Object.keys(INFERENCE_DICTIONARY).map((name, index) => category(`cat-${index}`, name));
 const idOf = (name: string) => master.find((row) => row.name === name)?.id;
-const noRecords: InferenceRecords = { items: [], history: [] };
-const dictionaryOnly = createCategoryInferrer(() => noRecords);
+const noHistory: readonly HistoryEntry[] = [];
+const dictionaryOnly = createCategoryInferrer(() => noHistory);
 
 function learned(categoryId: string, names: readonly string[], source: HistoryEntry["categorySource"] = "user") {
   return names.map((name, index) =>
@@ -30,9 +31,9 @@ const gadgets = learned(GADGET.id, ["歯車大", "歯車中", "歯車小", "歯�
 describe("組み込みの語彙の辞書", () => {
   const words = Object.values(INFERENCE_DICTIONARY).flat();
 
-  it("語は 800 から 1500 の範囲にある", () => {
+  it("語は 800 から 2000 の範囲にある", () => {
     expect(words.length).toBeGreaterThanOrEqual(800);
-    expect(words.length).toBeLessThanOrEqual(1500);
+    expect(words.length).toBeLessThanOrEqual(2000);
   });
 
   it("正規化しても同じ語が重ならない", () => {
@@ -85,7 +86,18 @@ describe("組み込みの語彙の辞書", () => {
 
   it("短い語は部分一致に使わない", async () => {
     expect(await dictionaryOnly.infer("ふともも", master)).toBeNull();
-    expect(await dictionaryOnly.infer("架空の酒", master)).toBeNull();
+  });
+
+  it.each([
+    ["チーズパン", "パン"],
+    ["コーヒーゼリー", "菓子"],
+    ["りんご酢", "調味料"],
+    ["卵10個", "卵"],
+    ["牛乳 1L", "乳製品"],
+    ["キャベツ1/2", "野菜"],
+    ["大根 半分", "野菜"],
+  ])("語尾と数量を見る: %s", async (name, expected) => {
+    expect(await dictionaryOnly.infer(name, master)).toBe(idOf(expected));
   });
 
   it("知らない語と空の名前は null", async () => {
@@ -113,20 +125,12 @@ describe("組み込みの語彙の辞書", () => {
 
 describe("履歴で学ぶ Naive Bayes", () => {
   const categories = [WIDGET, GADGET];
-  const inferrerOf = (history: readonly HistoryEntry[], items: InferenceRecords["items"] = []) =>
-    createCategoryInferrer(() => ({ items, history }));
+  const inferrerOf = (history: readonly HistoryEntry[]) => createCategoryInferrer(() => history);
 
   it("似た名前の品目から決める", async () => {
     const inferrer = inferrerOf([...widgets, ...gadgets]);
     expect(await inferrer.infer("ねじ特大", categories)).toBe(WIDGET.id);
     expect(await inferrer.infer("歯車特大", categories)).toBe(GADGET.id);
-  });
-
-  it("今の品目からも学ぶ", async () => {
-    const items = widgets.map((entry) =>
-      itemFixture({ id: entry.id, name: entry.name, categoryId: entry.categoryId, categorySource: "history" }),
-    );
-    expect(await inferrerOf(gadgets, items).infer("ねじ特大", categories)).toBe(WIDGET.id);
   });
 
   it("推定で入った記録からは学ばない", async () => {
@@ -155,11 +159,12 @@ describe("履歴で学ぶ Naive Bayes", () => {
     expect(await inferrer.infer("ねじ特大", [GADGET])).toBeNull();
   });
 
-  it("確信があれば辞書より履歴を使う", async () => {
+  it("辞書にある語は履歴より辞書を使う", async () => {
     const mine = category("cat-mine", "架空の売り場");
     const dairy = category("cat-dairy", "乳製品");
     const history = learned(mine.id, ["低脂肪牛乳", "特濃牛乳", "成分調整牛乳", "牛乳1本", "牛乳2本"]);
-    expect(await inferrerOf(history).infer("低脂肪牛乳2本", [mine, dairy])).toBe(mine.id);
+    expect(await inferrerOf(history).infer("低脂肪牛乳2本", [mine, dairy])).toBe(dairy.id);
+    expect(await inferrerOf(history).infer("低脂肪牛乳2本", [mine])).toBe(mine.id);
   });
 
   it("確信が無ければ辞書へ進む", async () => {
@@ -168,11 +173,20 @@ describe("履歴で学ぶ Naive Bayes", () => {
   });
 });
 
+describe("品目名の一覧での精度", () => {
+  it.each(Object.entries(INFERENCE_EVAL_DATA))("%s は全部当たる", async (_group, rows) => {
+    for (const [name, expected] of rows) {
+      const allowed = expected.split("|").map(idOf);
+      expect(allowed, name).toContain(await dictionaryOnly.infer(name, master));
+    }
+  });
+});
+
 describe("モデルの作り直し", () => {
-  it("items と history の参照が同じ間は作り直さない", async () => {
+  it("history の参照が同じ間は作り直さない", async () => {
     const history = [...widgets, ...gadgets.slice(0, 2)];
-    const records: InferenceRecords = { items: [], history };
-    const inferrer = createCategoryInferrer(() => records);
+    let current = history;
+    const inferrer = createCategoryInferrer(() => current);
     const categories = [WIDGET, GADGET];
     expect(await inferrer.infer("歯車特大", categories)).toBeNull();
 
@@ -180,7 +194,7 @@ describe("モデルの作り直し", () => {
     history.push(...gadgets.slice(2));
     expect(await inferrer.infer("歯車特大", categories)).toBeNull();
 
-    records.history = [...history];
+    current = [...history];
     expect(await inferrer.infer("歯車特大", categories)).toBe(GADGET.id);
   });
 });

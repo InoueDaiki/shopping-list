@@ -12,12 +12,7 @@ import {
 } from "./constants.ts";
 import { INFERENCE_DICTIONARY } from "./inference-dictionary.ts";
 import { normalizeItemName } from "./normalize.ts";
-import type { Category, CategorySource, HistoryEntry, Id, Item } from "./types.ts";
-
-export interface InferenceRecords {
-  items: readonly Item[];
-  history: readonly HistoryEntry[];
-}
+import type { Category, CategorySource, HistoryEntry, Id } from "./types.ts";
 
 interface LearnedCategory {
   // 学習した品目名の数(同じ名前は1回と数える)
@@ -46,10 +41,11 @@ function charGrams(normalizedName: string): string[] {
   return grams;
 }
 
-// カテゴリがあり、推定で入ったのではない記録で学ぶ。自分の推定で自分を強化しないため。
+// カテゴリがあり、推定で入ったのではない履歴で学ぶ。自分の推定で自分を強化しないため。
+// 今の品目は使わない。足すたびに配列が変わり、毎回学習し直すことになるため。
 // 同じ名前を何度買っても1回と数える。それは lookupCategory が引くので、ここで見たいのは
 // 名前の広がりで、買う回数が多い品目のカテゴリに寄せたくない
-function trainModel({ items, history }: InferenceRecords): CategoryModel {
+function trainModel(history: readonly HistoryEntry[]): CategoryModel {
   const categories = new Map<Id, LearnedCategory>();
   const vocabulary = new Set<string>();
   const seen = new Set<string>();
@@ -74,7 +70,6 @@ function trainModel({ items, history }: InferenceRecords): CategoryModel {
     }
   };
 
-  for (const item of items) learn(item.name, item.categoryId, item.categorySource);
   for (const entry of history) learn(entry.name, entry.categoryId, entry.categorySource);
   return { categories, vocabulary: vocabulary.size };
 }
@@ -132,8 +127,24 @@ function canMatchPartially(word: string): boolean {
   return word.length >= min;
 }
 
-// 完全一致を先に見て、次に最長の部分一致を取る。同じ長さなら後ろの語を取る(日本語の
-// 複合語は後ろが中心になる)。マスタに名前の無いカテゴリの語は無かったものとして扱う
+// 語尾では短い語も使う。日本語の複合語は後ろが中心になる(「チーズパン」はパン、
+// 「りんご酢」は酢)。漢字なら1文字でもよいが、かなの2文字は偶然が多いので「ぱん」だけ
+function canMatchAtEnd(word: string): boolean {
+  return word === "ぱん" || word.length >= INFERENCE_MIN_PARTIAL_LENGTH || /[一-鿿]/.test(word);
+}
+
+// 語尾の数量と量の指定を除く(「卵10個」「牛乳 1l」「キャベツ1/2」「大根 半分」)
+const QUANTITY_SUFFIX =
+  /\s*(?:\d+(?:[./]\d+)?\s*(?:個|こ|本|枚|袋|ぱっく|p|缶|玉|丁|切れ|切|束|箱|ろーる|kg|g|l|ml|cc)?(?:入り?)?|半分|半玉|少々|小袋|大袋|徳用)$/;
+
+// 「水2l 6本」のように重なることがあるので、変わらなくなるまで除く
+function withoutQuantity(normalizedName: string): string {
+  const name = normalizedName.replace(QUANTITY_SUFFIX, "").trim();
+  return name === normalizedName ? name : withoutQuantity(name);
+}
+
+// 完全一致、語尾の最長の語、どこかの最長の語の順に見る。同じ長さなら後ろの語を取る。
+// マスタに名前の無いカテゴリの語は無かったものとして扱う
 function lookUpDictionary(normalizedName: string, categories: readonly Category[]): Id | null {
   const words = dictionary();
   const available = new Map<string, Id>();
@@ -145,9 +156,17 @@ function lookUpDictionary(normalizedName: string, categories: readonly Category[
 
   const exact = categoryOf(normalizedName);
   if (exact !== null) return exact;
-  for (let length = normalizedName.length - 1; length >= 1; length--) {
-    for (let start = normalizedName.length - length; start >= 0; start--) {
-      const word = normalizedName.slice(start, start + length);
+  const name = withoutQuantity(normalizedName);
+  const bare = categoryOf(name);
+  if (bare !== null) return bare;
+  for (let start = 1; start < name.length; start++) {
+    const word = name.slice(start);
+    const category = canMatchAtEnd(word) ? categoryOf(word) : null;
+    if (category !== null) return category;
+  }
+  for (let length = name.length - 1; length >= 1; length--) {
+    for (let start = name.length - length; start >= 0; start--) {
+      const word = name.slice(start, start + length);
       const category = canMatchPartially(word) ? categoryOf(word) : null;
       if (category !== null) return category;
     }
@@ -155,18 +174,18 @@ function lookUpDictionary(normalizedName: string, categories: readonly Category[
   return null;
 }
 
-// 履歴で確信があればそれを、無ければ辞書を、それも無ければ null を返す。
-// モデルは items と history の配列の参照が変わったときだけ作り直す
-export function createCategoryInferrer(records: () => InferenceRecords): CategoryInferrer {
+// 辞書を先に見て、無ければ履歴で確信があるものを返す。文字の並びだけの学習は、辞書の語を
+// 履歴より先に見ないと壊す(検証で、辞書と違う答えの9割以上が誤りだった。「バター」が
+// 「バターコーヒー」に引かれるなど)。正しい修正は lookupCategory が同じ名前で先に引く。
+// モデルは history の配列の参照が変わったときだけ作り直す
+export function createCategoryInferrer(records: () => readonly HistoryEntry[]): CategoryInferrer {
   let model: CategoryModel | null = null;
-  let trainedItems: InferenceRecords["items"] | null = null;
-  let trainedHistory: InferenceRecords["history"] | null = null;
+  let trainedHistory: readonly HistoryEntry[] | null = null;
 
   const currentModel = (): CategoryModel => {
-    const { items, history } = records();
-    if (model === null || items !== trainedItems || history !== trainedHistory) {
-      model = trainModel({ items, history });
-      trainedItems = items;
+    const history = records();
+    if (model === null || history !== trainedHistory) {
+      model = trainModel(history);
       trainedHistory = history;
     }
     return model;
@@ -176,7 +195,7 @@ export function createCategoryInferrer(records: () => InferenceRecords): Categor
     async infer(name, categories) {
       const normalized = normalizeItemName(name);
       if (normalized === "") return null;
-      return classify(currentModel(), normalized, categories) ?? lookUpDictionary(normalized, categories);
+      return lookUpDictionary(normalized, categories) ?? classify(currentModel(), normalized, categories);
     },
   };
 }

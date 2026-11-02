@@ -36,15 +36,19 @@ export default function Lists() {
         <PageHeader
           title="買い物リスト"
           actions={
-            <Button icon variant="ghost" accessibilityLabel="設定" onPress={() => router.push("/settings")}>
-              <Icon icon={Settings} size={22} />
-            </Button>
+            <View className="flex-row">
+              <Button icon variant="ghost" accessibilityLabel="リストを追加" onPress={() => setAdding(true)}>
+                <Icon icon={Plus} size={22} />
+              </Button>
+              <Button icon variant="ghost" accessibilityLabel="設定" onPress={() => router.push("/settings")}>
+                <Icon icon={Settings} size={22} />
+              </Button>
+            </View>
           }
         />
         <SyncNoticeBar />
-        <NearbyShopping />
         {lists.length === 0 ? (
-          <Text className="py-8 text-center text-fg-muted">リストがありません。下のボタンから追加してください。</Text>
+          <Text className="py-8 text-center text-fg-muted">リストがありません。右上の + から追加してください。</Text>
         ) : (
           <View className="overflow-hidden rounded-lg border border-border bg-surface">
             {lists.map((list, index) => (
@@ -52,9 +56,9 @@ export default function Lists() {
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => router.push(`/lists/${list.id}`)}
-                  className="min-h-14 min-w-0 flex-1 flex-row items-center gap-2 pl-4 active:bg-surface-muted"
+                  className="min-h-20 min-w-0 flex-1 flex-row items-center gap-3 pl-5 active:bg-surface-muted"
                 >
-                  <Text className="min-w-0 shrink font-medium">{list.name}</Text>
+                  <Text className="min-w-0 shrink text-lg font-medium">{list.name}</Text>
                   {(remaining.get(list.id) ?? 0) > 0 && (
                     <View>
                       <Badge>{remaining.get(list.id) ?? 0}</Badge>
@@ -70,10 +74,7 @@ export default function Lists() {
         )}
       </ScrollView>
       <View className="px-4 pt-2 pb-safe-or-4">
-        <Button variant="primary" size="lg" onPress={() => setAdding(true)}>
-          <Icon icon={Plus} size={20} />
-          リストを追加
-        </Button>
+        <NearbyShopping />
       </View>
 
       <NamePrompt

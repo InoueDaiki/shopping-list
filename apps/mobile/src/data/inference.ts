@@ -3,10 +3,7 @@ import { createCategoryInferrer, resolveCategory, type Item } from "@shopping-li
 
 import { localStore, repository } from "./runtime.ts";
 
-const inferrer = createCategoryInferrer(() => ({
-  items: localStore.rows("items"),
-  history: localStore.rows("history"),
-}));
+const inferrer = createCategoryInferrer(() => localStore.rows("history"));
 
 async function inferAndApply(item: Item): Promise<void> {
   // 追加の操作の描画を先に済ませる

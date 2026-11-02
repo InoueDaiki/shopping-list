@@ -1,10 +1,8 @@
 import { nearestStore, type GeoPoint } from "@shopping-list/core";
-import { Icon, Text } from "@shopping-list/ui-native";
+import { Button, Icon } from "@shopping-list/ui-native";
 import { router, useFocusEffect } from "expo-router";
-import ChevronRight from "lucide-react-native/icons/chevron-right";
 import MapPin from "lucide-react-native/icons/map-pin";
 import { useCallback, useMemo, useState } from "react";
-import { Pressable, View } from "react-native";
 
 import { useTable } from "../data/hooks.ts";
 import { watchPositionOnce } from "../data/location.ts";
@@ -41,20 +39,17 @@ export function NearbyShopping() {
   if (!nearest || !list) return null;
 
   return (
-    <Pressable
-      accessibilityRole="button"
+    <Button
+      variant="primary"
+      size="lg"
+      accessibilityLabel={`${nearest.name}で買い物を始める。リストは${list.name}`}
       onPress={() => {
         repository.selectStore(list.id, nearest.id);
         router.push(`/lists/${list.id}`);
       }}
-      className="min-h-14 flex-row items-center gap-3 rounded-lg border border-border bg-surface px-4 py-2 active:bg-surface-muted"
     >
-      <Icon icon={MapPin} size={20} color="primary-fg" />
-      <View className="min-w-0 flex-1">
-        <Text className="font-medium">{`${nearest.name}で買い物を始める`}</Text>
-        <Text className="text-xs text-fg-muted">{list.name}</Text>
-      </View>
-      <Icon icon={ChevronRight} size={20} color="fg-muted" />
-    </Pressable>
+      <Icon icon={MapPin} size={20} />
+      {`${nearest.name}で買い物を始める`}
+    </Button>
   );
 }
