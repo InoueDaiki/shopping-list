@@ -110,7 +110,8 @@ export function AddItemBar({ listId, onShowItem }: AddItemBarProps) {
 
   return (
     <>
-      {focused && <AddSuggestions listId={listId} query={name} onSelect={add} />}
+      {/* キーボードを閉じても打った文字が残っていれば候補は要る */}
+      {(focused || name.trim() !== "") && <AddSuggestions listId={listId} query={name} onSelect={add} />}
       {notice !== null && (
         <Text accessibilityLiveRegion="polite" className="text-sm text-fg-muted">
           {notice}
