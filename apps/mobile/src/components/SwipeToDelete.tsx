@@ -24,7 +24,8 @@ export function SwipeToDelete({ label, onDelete, children }: SwipeToDeleteProps)
   const responder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_event, { dx, dy }) => isHorizontalSwipe(dx, dy),
+        // 行の中のチェックやボタンが先に押されているので、捕まえる段階で横の動きを取る
+        onMoveShouldSetPanResponderCapture: (_event, { dx, dy }) => isHorizontalSwipe(dx, dy),
         // 一度払い始めたら、一覧のスクロールに渡さない
         onPanResponderTerminationRequest: () => false,
         onPanResponderMove: Animated.event([null, { dx: translateX }], { useNativeDriver: false }),
