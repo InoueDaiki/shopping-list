@@ -5,7 +5,6 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import { SESSION_KEY } from "./repository.ts";
 import { INVITE_KEY, localStore, orderForStore, OWNER_KEY, repository, SHEET_KEY, syncRunner } from "./runtime.ts";
-import { activeSession } from "./shopping.ts";
 import type { SheetRef } from "./spreadsheet.ts";
 import type { SyncStatus } from "./syncRunner.ts";
 
@@ -66,11 +65,11 @@ export function useListItems(listId: Id) {
   return useMemo(() => items.filter((item) => item.listId === listId), [items, listId]);
 }
 
-// 今の買い物の状態。時間が空いたものは無かったことにする
-export function useShopping() {
+// このリストの今の買い物の状態。時間が空いたものと、別のリストのものは無かったことにする
+export function useShopping(listId: Id) {
   const stored = useSetting(SESSION_KEY);
   // stored が変わったときだけ読み直す
-  return useMemo(() => (stored === null ? null : activeSession(repository.session(), new Date().toISOString())), [stored]);
+  return useMemo(() => (stored === null ? null : repository.currentSession(listId)), [stored, listId]);
 }
 
 // 店舗のカテゴリの順番。元の表が変わったときだけ計算し直す

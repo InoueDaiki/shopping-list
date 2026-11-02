@@ -36,6 +36,19 @@ function emptyApply(overrides: Partial<RemoteApply> = {}): RemoteApply {
   };
 }
 
+describe("migrate", () => {
+  it("前の版の店舗に list_id を足し、行は null で残す", () => {
+    const db = openTestDatabase();
+    db.exec(`
+      CREATE TABLE stores (id TEXT PRIMARY KEY, name TEXT NOT NULL, lat REAL, lng REAL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      INSERT INTO stores VALUES ('store-1', '架空の店', 1.5, 2.5, '2028-01-01T00:00:00.000Z', '2028-01-01T00:00:00.000Z');
+      PRAGMA user_version = 2;
+    `);
+    const store = new SqliteLocalStore(db);
+    expect(store.rows("stores")[0]).toMatchObject({ id: "store-1", lat: 1.5, listId: null });
+  });
+});
+
 describe("SqliteLocalStore", () => {
   let store: SqliteLocalStore;
 
@@ -71,6 +84,7 @@ describe("SqliteLocalStore", () => {
     const old = new SqliteLocalStore(db);
     old.commitNow([put(item())]);
     db.exec("ALTER TABLE items DROP COLUMN checked_updated_at");
+    db.exec("ALTER TABLE stores DROP COLUMN list_id");
     db.exec("PRAGMA user_version = 1");
 
     expect(new SqliteLocalStore(db).rows("items")[0]?.checkedUpdatedAt).toBe(AT);
@@ -91,11 +105,11 @@ describe("SqliteLocalStore", () => {
     store.commitNow([
       put(row),
       { action: "put", table: "storeOrders", row: { storeId: "store-1", categoryIds: ["a", "b"], editedAt: AT } },
-      { action: "put", table: "stores", row: { id: "store-1", name: "架空の店", lat: 1.5, lng: null, createdAt: AT, updatedAt: AT } },
+      { action: "put", table: "stores", row: { id: "store-1", name: "架空の店", lat: 1.5, lng: null, createdAt: AT, updatedAt: AT, listId: "list-1" } },
     ]);
     expect(store.rows("items")).toEqual([row]);
     expect(store.rows("storeOrders")[0]?.categoryIds).toEqual(["a", "b"]);
-    expect(store.rows("stores")[0]?.lat).toBe(1.5);
+    expect(store.rows("stores")[0]).toMatchObject({ lat: 1.5, listId: "list-1" });
   });
 
   it("変わるまで同じ配列を返し、変わった表だけ通知する", () => {

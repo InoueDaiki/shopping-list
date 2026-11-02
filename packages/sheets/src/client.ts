@@ -43,6 +43,7 @@ export interface ValueRange {
 export interface SheetProperties {
   sheetId: number;
   title: string;
+  gridProperties?: { columnCount?: number };
 }
 
 export interface Spreadsheet {

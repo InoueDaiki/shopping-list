@@ -12,7 +12,7 @@ export default function AppLayout() {
 
   useEffect(() => {
     repository.finishTrips();
-    syncRunner.setShopping(repository.currentSession() !== null);
+    syncRunner.setShopping(repository.isShopping());
     syncRunner.start();
     const subscription = AppState.addEventListener("change", (state) => {
       syncRunner.setForeground(state === "active");

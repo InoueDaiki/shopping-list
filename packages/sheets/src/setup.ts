@@ -6,6 +6,7 @@ import { rowData } from "./cells.ts";
 import type { Cell, SheetsClient, SheetsRequest, ValueRange } from "./client.ts";
 import { encodeRow } from "./codec.ts";
 import {
+  ADDED_COLUMNS,
   ID_LIST_PATTERN,
   ID_PATTERN,
   ISO_PATTERN,
@@ -13,6 +14,7 @@ import {
   SCHEMA_VERSION,
   SHEETS,
   TABLE_SHEETS,
+  UPGRADABLE_VERSION,
   columnLetter,
   headerRange,
   type Column,
@@ -158,8 +160,10 @@ function columnRange(def: SheetDef, index: number) {
   };
 }
 
-function columnRequests(def: SheetDef): SheetsRequest[] {
+// fromColumn より右の列の書式と入力規則
+function columnRequests(def: SheetDef, fromColumn = 0): SheetsRequest[] {
   return def.columns.flatMap((column, index) => {
+    if (index < fromColumn) return [];
     const requests: SheetsRequest[] = [];
     const range = columnRange(def, index);
     if (TEXT_KINDS.has(column.kind)) {
@@ -214,8 +218,20 @@ export interface SpreadsheetSurvey {
   missing: SheetName[];
   // 今あるアプリのシートの番号
   sheetIds: Partial<SheetIds>;
+  // 今あるアプリのシートの列の数
+  columnCounts: Partial<Record<SheetName, number>>;
   // アプリのシートも含む、すべてのシートの番号
   allSheetIds: number[];
+  // 前の版で、upgradeSpreadsheet で上げられる
+  outdated: boolean;
+}
+
+// 見出しが定義のとおりか。前の版のシートには足す列がまだ無い
+function headerMatches(def: SheetDef, header: readonly Cell[], outdated: boolean): boolean {
+  const added = outdated ? (ADDED_COLUMNS[def.name] ?? []) : [];
+  return def.columns.every(
+    (column, i) => header[i] === column.name || (header[i] === undefined && added.includes(column.name)),
+  );
 }
 
 // シートの形を調べる。読むだけで何も書かない。アプリと同じ名前のシートが別の列や
@@ -226,7 +242,7 @@ export async function surveySpreadsheet(
 ): Promise<SpreadsheetSurvey> {
   const spreadsheet = await client.get(
     spreadsheetId,
-    "spreadsheetId,sheets.properties(sheetId,title)",
+    "spreadsheetId,sheets.properties(sheetId,title,gridProperties(columnCount))",
   );
   const all = (spreadsheet.sheets ?? []).map(({ properties }) => properties);
   const found = new Map(all.map(({ title, sheetId }) => [title, sheetId]));
@@ -235,23 +251,72 @@ export async function surveySpreadsheet(
   const sheetIds = Object.fromEntries(
     present.map((def) => [def.name, found.get(def.name) as number]),
   ) as Partial<SheetIds>;
+  const counts = new Map(all.map(({ title, gridProperties }) => [title, gridProperties?.columnCount]));
+  const columnCounts = Object.fromEntries(
+    present.map((def) => [def.name, counts.get(def.name)]),
+  ) as Partial<Record<SheetName, number>>;
   const allSheetIds = [...found.values()];
   const hasMeta = found.has(META_SHEET.name);
-  const ranges = [...(hasMeta ? [`${META_SHEET.name}!A2`] : []), ...present.map(headerRange)];
-  if (ranges.length === 0) return { missing, sheetIds, allSheetIds };
+  const ranges = [
+    ...(hasMeta ? [`${META_SHEET.name}!A2`] : []),
+    ...present.map((def) => headerRange(def, columnCounts[def.name])),
+  ];
+  if (ranges.length === 0) return { missing, sheetIds, columnCounts, allSheetIds, outdated: false };
 
   const values = await client.batchGet(spreadsheetId, ranges);
+  const outdated = hasMeta && values[0]?.values?.[0]?.[0] === UPGRADABLE_VERSION;
   const headers = hasMeta ? values.slice(1) : values;
-  const conflicts = present.filter((def, index) => {
-    const header = headers[index]?.values?.[0] ?? [];
-    return def.columns.some((column, i) => header[i] !== column.name);
-  });
+  const conflicts = present.filter(
+    (def, index) => !headerMatches(def, headers[index]?.values?.[0] ?? [], outdated),
+  );
   if (conflicts.length > 0) {
     const names = conflicts.map((def) => def.name).join("、");
     throw new RemoteError("schema", `同じ名前で列の違うシートがある: ${names}`);
   }
-  if (hasMeta) assertSchemaVersion(values[0]);
-  return { missing, sheetIds, allSheetIds };
+  if (hasMeta && !outdated) assertSchemaVersion(values[0]);
+  return { missing, sheetIds, columnCounts, allSheetIds, outdated };
+}
+
+// 前の版のシートを上げる要求。列を足すのは末尾だけで、データの行のセルには触らない。
+// どれも同じ結果を置くだけの要求なので、2台が同時に送っても、後の1台が古い調査で送っても壊れない
+function upgradeRequests({ sheetIds, columnCounts }: SpreadsheetSurvey): SheetsRequest[] {
+  const sheets = SHEETS.flatMap((def): SheetsRequest[] => {
+    const sheetId = sheetIds[def.name];
+    const added = ADDED_COLUMNS[def.name];
+    if (sheetId === undefined || added === undefined) return [];
+    const placed = { ...def, sheetId };
+    // 足りるときは触らない。列の数を減らすと、手で足した列が消える
+    const widen: SheetsRequest[] =
+      (columnCounts[def.name] ?? 0) >= def.columns.length
+        ? []
+        : [
+            {
+              updateSheetProperties: {
+                properties: { sheetId, gridProperties: { columnCount: def.columns.length } },
+                fields: "gridProperties.columnCount",
+              },
+            },
+          ];
+    return [...widen, header(placed), ...columnRequests(placed, def.columns.length - added.length)];
+  });
+  const version: SheetsRequest = {
+    updateCells: {
+      start: { sheetId: sheetIds.Meta, rowIndex: 1, columnIndex: 0 },
+      rows: [rowData([SCHEMA_VERSION])],
+      fields: "userEnteredValue",
+    },
+  };
+  return [...sheets, version];
+}
+
+// 前の版のシートを、データを失わずに今の版へ上げる。今の版なら何もしない。
+// 1回の batchUpdate なので、途中の形をほかの端末に見せず、失敗してももう一度呼べる
+export async function upgradeSpreadsheet(
+  client: SheetsClient,
+  spreadsheetId: string,
+  survey: SpreadsheetSurvey,
+): Promise<void> {
+  if (survey.outdated) await client.batchUpdate(spreadsheetId, upgradeRequests(survey));
 }
 
 // シートの番号が、今あるシートと重ならないようにする(既存のスプレッドシートに足すとき)
@@ -282,7 +347,7 @@ function buildAddRequests(
     ...(defaultSheetId === null ? [] : [{ deleteSheet: { sheetId: defaultSheetId } }]),
     ...defs.map(header),
     ...seeds,
-    ...defs.flatMap(columnRequests),
+    ...defs.flatMap((def) => columnRequests(def)),
     ...defs.map(protect),
   ];
 }
@@ -300,14 +365,16 @@ export interface EnsureOptions {
   defaultSheetId?: number;
 }
 
-// 足りないシートを足して初期化する。あるシートには触らない。1回の batchUpdate なので、
-// 全部足せるか何も変わらないかになり、失敗してももう一度呼べば続きになる
+// 足りないシートを足して初期化する。あるシートは、前の版なら上げるほかは触らない。
+// 1回の batchUpdate なので、全部足せるか何も変わらないかになり、失敗してももう一度呼べば続きになる
 export async function ensureSpreadsheet(
   client: SheetsClient,
   spreadsheetId: string,
   options: EnsureOptions = {},
 ): Promise<void> {
-  const { missing, allSheetIds } = await surveySpreadsheet(client, spreadsheetId);
+  const survey = await surveySpreadsheet(client, spreadsheetId);
+  await upgradeSpreadsheet(client, spreadsheetId, survey);
+  const { missing, allSheetIds } = survey;
   if (missing.length === 0) return;
   const defs = SHEETS.filter((def) => missing.includes(def.name));
   const { defaultSheetId = null } = options;

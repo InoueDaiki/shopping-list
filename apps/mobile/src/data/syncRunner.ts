@@ -24,7 +24,7 @@ export interface SyncStatus {
 
 export interface SyncRunnerDeps {
   sync: () => Promise<SyncResult>;
-  // 同期が終わるたびに呼ぶ(トリップの片付け、リストの無い品目の片付け)
+  // 同期が終わるたびに呼ぶ(トリップの片付け、リストの無い品目と店舗の片付け)
   afterSync?: (result: SyncResult) => void;
   // 送信待ちの数。同期の途中で足された分を送り直すのに使う
   pendingCount: () => number;

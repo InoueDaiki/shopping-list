@@ -81,6 +81,7 @@ describe("codec", () => {
       lng: null,
       createdAt: AT,
       updatedAt: AT,
+      listId: "l1",
     };
     const list: ShoppingList = { id: "l1", name: "スーパー", sort: 1, updatedAt: AT };
     const order: StoreOrder = { storeId: "s1", categoryIds: ["c1", "c2"], editedAt: AT };
@@ -155,6 +156,43 @@ describe("codec", () => {
 
   it("表の列の数と encode の列の数が合う", () => {
     expect(encodeRow("items", item)).toHaveLength(TABLE_SHEETS.items.columns.length);
+  });
+});
+
+describe("Stores の list_id", () => {
+  const store: Store = {
+    id: "store_1",
+    name: "架空の店",
+    lat: null,
+    lng: null,
+    createdAt: AT,
+    updatedAt: AT,
+    listId: "list_1",
+  };
+
+  it("末尾の列に置き、往復できる", () => {
+    const cells = encodeRow("stores", store);
+    const columns = TABLE_SHEETS.stores.columns.map((column) => column.name);
+    expect(columns.slice(-2)).toEqual(["deleted_at", "list_id"]);
+    expect(cells).toHaveLength(columns.length);
+    expect(cells.at(-1)).toBe("list_1");
+    expect(decodeRow("stores", asRead(cells), 2)).toEqual({ kind: "row", row: store, deletedAt: null });
+  });
+
+  it("前の版の列の少ない行は null で読む", () => {
+    const short = asRead(encodeRow("stores", store)).slice(0, 6);
+    expect(decodeRow("stores", short, 2)).toEqual({ kind: "row", row: { ...store, listId: null }, deletedAt: null });
+  });
+
+  it("送信待ちの古い行の listId が無ければ空で書く", () => {
+    const { listId: _, ...old } = store;
+    expect(encodeRow("stores", old as Store).at(-1)).toBeNull();
+  });
+
+  it("ID の形でないリストは不正な行にする", () => {
+    const cells = asRead(encodeRow("stores", store));
+    cells[7] = "リスト!";
+    expect(decodeRow("stores", cells, 2).kind).toBe("issue");
   });
 });
 

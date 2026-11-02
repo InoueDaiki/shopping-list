@@ -35,7 +35,12 @@ import {
   columnIndex,
   dataRange,
 } from "./schema.ts";
-import { assertSchemaVersion, surveySpreadsheet, type SheetIds } from "./setup.ts";
+import {
+  assertSchemaVersion,
+  surveySpreadsheet,
+  upgradeSpreadsheet,
+  type SheetIds,
+} from "./setup.ts";
 import { parseSpreadsheetId } from "./spreadsheetId.ts";
 
 const FIRST_DATA_ROW = 2;
@@ -69,13 +74,14 @@ function updateSpans(write: RemoteWrite, length: number): [number, number][] {
       ];
 }
 
-// シートがそろい、見出しと版が合うことを確かめて、シートの番号を返す
+// シートがそろい、見出しと版が合うことを確かめて、シートの番号を返す。前の版なら上げる
 async function inspect(client: SheetsClient, spreadsheetId: string): Promise<SheetIds> {
-  const { missing, sheetIds } = await surveySpreadsheet(client, spreadsheetId);
-  if (missing.length > 0) {
-    throw new RemoteError("schema", `シートが足りない: ${missing.join("、")}`);
+  const survey = await surveySpreadsheet(client, spreadsheetId);
+  if (survey.missing.length > 0) {
+    throw new RemoteError("schema", `シートが足りない: ${survey.missing.join("、")}`);
   }
-  return sheetIds as SheetIds;
+  await upgradeSpreadsheet(client, spreadsheetId, survey);
+  return survey.sheetIds as SheetIds;
 }
 
 // 2人目の初期化。貼られた URL か ID を検査し、スプレッドシートの ID を返す。

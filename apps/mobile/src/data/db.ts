@@ -61,6 +61,10 @@ const MIGRATIONS: readonly Migration[] = [
       UPDATE items SET checked_updated_at = updated_at;
     `,
   },
+  {
+    version: 3,
+    sql: `ALTER TABLE stores ADD COLUMN list_id TEXT;`,
+  },
 ];
 
 export function migrate(db: Database): void {

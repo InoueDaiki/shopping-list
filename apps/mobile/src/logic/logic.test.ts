@@ -5,6 +5,7 @@ import { redirectSystemPath } from "../app/+native-intent.ts";
 import type { SyncStatus } from "../data/syncRunner.ts";
 import { accountCheck, ownerValue } from "./account.ts";
 import { categoryToneMap } from "./categoryTone.ts";
+import { formatCoordinates, geoUrl, parseCoordinates } from "./coordinates.ts";
 import { inviteLink, inviteMessage, parseInviteLink } from "./invite.ts";
 import { itemRowIndex, listRows, openItemNamed } from "./listRows.ts";
 import { splitMemo } from "./memo.ts";
@@ -188,6 +189,37 @@ describe("招待リンク", () => {
     const message = inviteMessage({ spreadsheetId: ID, spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${ID}/edit` });
     expect(message).toContain(inviteLink(ID));
     expect(message).toContain(`https://docs.google.com/spreadsheets/d/${ID}/edit`);
+  });
+});
+
+describe("parseCoordinates", () => {
+  it.each([
+    ["35.0000, 139.0000", { lat: 35, lng: 139 }],
+    ["  -12.5,-45.25 ", { lat: -12.5, lng: -45.25 }],
+    ["1.5 2.5", { lat: 1.5, lng: 2.5 }],
+    ["35.5，139.5", { lat: 35.5, lng: 139.5 }],
+    ["90, 180", { lat: 90, lng: 180 }],
+    ["-90, -180", { lat: -90, lng: -180 }],
+  ])("%s を読む", (text, point) => {
+    expect(parseCoordinates(text)).toEqual(point);
+  });
+
+  it.each(["", "35.0", "90.1, 0", "-90.1, 0", "0, 180.1", "0, -180.1", "緯度, 経度", "1, 2, 3", "1.2.3, 4", "https://example.com"])(
+    "%s は読まない",
+    (text) => {
+      expect(parseCoordinates(text)).toBeNull();
+    },
+  );
+
+  it("書いた形を読み直せる", () => {
+    const point = { lat: 12.345678, lng: -98.765432 };
+    expect(parseCoordinates(formatCoordinates(point))).toEqual(point);
+  });
+});
+
+describe("geoUrl", () => {
+  it("位置にピンを立てる URL にする", () => {
+    expect(geoUrl({ lat: 1.5, lng: -2.5 })).toBe("geo:1.5,-2.5?q=1.5,-2.5");
   });
 });
 

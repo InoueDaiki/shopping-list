@@ -55,9 +55,9 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
   stores: {
     name: "stores",
     key: "id",
-    columns: ["id", "name", "lat", "lng", "created_at", "updated_at"],
+    columns: ["id", "name", "lat", "lng", "created_at", "updated_at", "list_id"],
     orderBy: "created_at, id",
-    encode: (row: Store) => [row.id, row.name, row.lat, row.lng, row.createdAt, row.updatedAt],
+    encode: (row: Store) => [row.id, row.name, row.lat, row.lng, row.createdAt, row.updatedAt, row.listId],
     decode: (row) => ({
       id: row.id as Id,
       name: row.name as string,
@@ -65,6 +65,7 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
       lng: row.lng as number | null,
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
+      listId: row.list_id as Id | null,
     }),
   },
   items: {

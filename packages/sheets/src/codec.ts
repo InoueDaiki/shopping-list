@@ -164,9 +164,11 @@ const stores: Codec<Store> = {
       lng,
       createdAt: r.iso("created_at"),
       updatedAt: r.iso("updated_at"),
+      listId: r.optionalId("list_id"),
     };
   },
-  encode: (row) => [row.id, row.name, row.lat, row.lng, row.createdAt, row.updatedAt, null],
+  // 版を上げる前の送信待ちの行には listId が無い
+  encode: (row) => [row.id, row.name, row.lat, row.lng, row.createdAt, row.updatedAt, null, row.listId ?? null],
 };
 
 const items: Codec<Item> = {

@@ -7,6 +7,7 @@ import {
   parseSpreadsheetId,
   SCHEMA_VERSION,
   surveySpreadsheet,
+  upgradeSpreadsheet,
   type SheetsClient,
 } from "@shopping-list/sheets";
 
@@ -84,14 +85,20 @@ export type OpenedSheet =
   | { kind: "needsInit"; spreadsheetId: string; missing: readonly string[] };
 
 // 貼られたシートを調べる。シートの形が足りなければ、まだ何も書かずに needsInit を返す。
-// 同じ名前のシートの列が違えば、RemoteError(schema)に原因を入れて投げる
+// 同じ名前のシートの列が違えば、RemoteError(schema)に原因を入れて投げる。前の版のシートは上げる
 export async function openExistingSheet(client: SheetsClient, urlOrId: string): Promise<OpenedSheet> {
   const spreadsheetId = parseSpreadsheetId(parseInviteLink(urlOrId) ?? urlOrId);
   if (spreadsheetId === null) throw new RemoteError("invalid", "スプレッドシートの URL ではない");
-  const { missing } = await surveySpreadsheet(client, spreadsheetId);
+  const survey = await surveySpreadsheet(client, spreadsheetId);
+  const { missing } = survey;
   if (missing.length > 0) return { kind: "needsInit", spreadsheetId, missing };
-  // spreadsheets のスコープでは権限を読めない。同じ値を書き戻して、書けるかだけを確かめる
-  await requireWrite(() => client.valuesBatchUpdate(spreadsheetId, [{ range: `${META_SHEET.name}!A2`, values: [[SCHEMA_VERSION]] }]));
+  // spreadsheets のスコープでは権限を読めない。同じ値を書き戻して、書けるかだけを確かめる。
+  // 前の版なら、列を足す前に版だけを書かないよう、上げる書き込みで確かめる
+  await requireWrite(() =>
+    survey.outdated
+      ? upgradeSpreadsheet(client, spreadsheetId, survey)
+      : client.valuesBatchUpdate(spreadsheetId, [{ range: `${META_SHEET.name}!A2`, values: [[SCHEMA_VERSION]] }]),
+  );
   return { kind: "ready", sheet: sheetRef(spreadsheetId) };
 }
 

@@ -7,6 +7,8 @@ interface FakeSheet {
   sheetId: number;
   title: string;
   grid: Cell[][];
+  // 本物と同じく、この外を指す範囲は拒否する。無ければ検査しない
+  columnCount?: number;
 }
 
 interface CellData {
@@ -53,6 +55,8 @@ export class FakeSheets {
   readonly failures: FetchResponse[] = [];
   // true を返す要求が混ざると、batchUpdate の全体を 400 で拒否する。何も反映しない
   rejects: ((request: Record<string, unknown>) => boolean) | null = null;
+  // 反映した batchUpdate の要求。値に関わらない書式や入力規則を確かめるのに使う
+  readonly requests: Record<string, any>[] = [];
   spreadsheetId = "fakeSpreadsheetId0123456789";
 
   sheet(title: string): FakeSheet {
@@ -89,13 +93,14 @@ export class FakeSheets {
         return respond(400, { error: { message: "入力規則の違反" } });
       }
       for (const request of requests) this.#apply(request);
+      this.requests.push(...requests);
       return respond(200, { replies: [] });
     }
     if (url.includes("values:batchGet")) return this.#batchGet(url);
     return respond(200, {
       spreadsheetId: this.spreadsheetId,
-      sheets: this.sheets.map(({ sheetId, title }) => ({
-        properties: { sheetId, title },
+      sheets: this.sheets.map(({ sheetId, title, columnCount }) => ({
+        properties: { sheetId, title, gridProperties: { columnCount } },
       })),
     });
   }
@@ -105,6 +110,11 @@ export class FakeSheets {
     const ranges = query
       .filter((part) => part.startsWith("ranges="))
       .map((part) => decodeURIComponent(part.slice("ranges=".length)));
+    const outside = ranges.some((range) => {
+      const { title, columns } = parseRange(range);
+      return columns > (this.sheet(title).columnCount ?? Infinity);
+    });
+    if (outside) return respond(400, { error: { message: "範囲がシートの外" } });
     const valueRanges = ranges.map((range) => {
       const { title, from, columns } = parseRange(range);
       const rows = this.sheet(title)
@@ -133,8 +143,18 @@ export class FakeSheets {
     const body = request[name as string] as unknown as Record<string, never>;
     switch (name) {
       case "addSheet": {
-        const { sheetId, title } = body.properties as unknown as FakeSheet;
-        this.sheets.push({ sheetId, title, grid: [] });
+        const { sheetId, title, gridProperties } = body.properties as unknown as FakeSheet & {
+          gridProperties: { columnCount: number };
+        };
+        this.sheets.push({ sheetId, title, grid: [], columnCount: gridProperties.columnCount });
+        break;
+      }
+      case "updateSheetProperties": {
+        const { sheetId, gridProperties } = body.properties as unknown as {
+          sheetId: number;
+          gridProperties: { columnCount: number };
+        };
+        this.#byId(sheetId).columnCount = gridProperties.columnCount;
         break;
       }
       case "deleteSheet": {
@@ -153,8 +173,10 @@ export class FakeSheets {
           rowIndex: number;
           columnIndex: number;
         };
-        const { grid } = this.#byId(start.sheetId);
+        const { grid, columnCount } = this.#byId(start.sheetId);
         const rows = rowsOf(body.rows as unknown as { values: CellData[] }[]);
+        const width = start.columnIndex + Math.max(...rows.map((row) => row.length));
+        if (width > (columnCount ?? Infinity)) throw new Error("シートの外へ書いた");
         // 渡したセルだけが変わり、右のセルは残る
         rows.forEach((row, i) => {
           const target = (grid[start.rowIndex + i] ??= []);

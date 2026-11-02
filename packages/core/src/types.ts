@@ -26,6 +26,8 @@ export interface Store {
   lng: number | null;
   createdAt: Iso;
   updatedAt: Iso;
+  // 属するリスト。null は移行の途中の状態で、どのリストにも出す
+  listId: Id | null;
 }
 
 // history: 過去の品目から引いた。inferred: 推定した。user: 利用者が決めた

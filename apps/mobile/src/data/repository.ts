@@ -1,6 +1,7 @@
 // 画面からの書き込み。すべて同期で SQLite に入れ、送信は同期が裏で行う
 import {
   normalizeItemName,
+  storesForList,
   type Category,
   type CategoryResolution,
   type Id,
@@ -17,6 +18,7 @@ import {
   isStoreCorrection,
   reviewDirection,
   sessionChecks,
+  sessionOfList,
   startSession,
   withManualDirection,
   type ShoppingSession,
@@ -66,14 +68,18 @@ export class Repository {
     if (list) this.#store.commitNow([{ action: "put", table: "lists", row: { ...list, name: name.trim(), updatedAt: this.#now() } }]);
   }
 
-  // 品目も一緒に消す。History は足すだけなので残す
+  // 品目と、そのリストの店舗と手の順番も一緒に消す。History は足すだけなので残す
   deleteList(id: Id): void {
     const at = this.#now();
+    const stores = new Set(this.#store.rows("stores").filter((store) => store.listId === id).map((store) => store.id));
     const items = this.#store.rows("items").filter((item) => item.listId === id);
     this.#store.commitNow([
+      ...this.#storeRemoval(stores, at),
       ...items.map((item): LocalChange => ({ action: "delete", table: "items", id: item.id, at })),
       { action: "delete", table: "lists", id, at },
     ]);
+    this.#forgetStores(stores);
+    if (this.session()?.listId === id) this.#store.setSetting(SESSION_KEY, null);
   }
 
   // --- 品目 ---
@@ -136,10 +142,10 @@ export class Repository {
     const item = this.#item(id);
     if (!item || item.checked) return false;
     const now = this.#now();
-    const current = this.currentSession();
+    const current = this.currentSession(item.listId);
     // 向きの切り替えだけで始まった買い物は、まだ店舗を聞いていない。スキップの後は聞き直さない
     const first = current === null || (current.storeId === null && !this.#hasChecks(current));
-    const session = { ...(current ?? startSession(now)), touchedAt: now };
+    const session = { ...(current ?? startSession(item.listId, now)), touchedAt: now };
     const checked: Item = { ...item, checked: true, checkedAt: now, checkedStoreId: session.storeId, checkedUpdatedAt: now };
     this.#store.commitNow([{ action: "put", table: "items", row: checked }]);
     this.#saveSession(reviewDirection(session, this.#learnedOrder(session.storeId), this.#store.rows("items")));
@@ -148,7 +154,9 @@ export class Repository {
 
   #hasChecks(session: ShoppingSession): boolean {
     const startedAt = Date.parse(session.startedAt);
-    return this.#store.rows("items").some((item) => item.checked && item.checkedAt !== null && Date.parse(item.checkedAt) >= startedAt);
+    return this.#store
+      .rows("items")
+      .some((item) => item.listId === session.listId && item.checked && item.checkedAt !== null && Date.parse(item.checkedAt) >= startedAt);
   }
 
   // チェックを外す。そのチェックの記録も消える(学習に使わない)
@@ -161,13 +169,20 @@ export class Repository {
 
   // --- 買い物の状態 ---
 
+  // listId の無い保存済みの状態は、どのリストの買い物か分からないので無視する
   session(): ShoppingSession | null {
     const stored = this.#store.setting(SESSION_KEY);
-    return stored === null ? null : (JSON.parse(stored) as ShoppingSession);
+    const session = stored === null ? null : (JSON.parse(stored) as Partial<ShoppingSession>);
+    return typeof session?.listId === "string" ? (session as ShoppingSession) : null;
   }
 
-  currentSession(): ShoppingSession | null {
-    return activeSession(this.session(), this.#now());
+  currentSession(listId: Id): ShoppingSession | null {
+    return sessionOfList(this.session(), listId, this.#now());
+  }
+
+  // どれかのリストで買い物をしているか
+  isShopping(): boolean {
+    return activeSession(this.session(), this.#now()) !== null;
   }
 
   #saveSession(session: ShoppingSession): void {
@@ -175,17 +190,19 @@ export class Repository {
   }
 
   // 今の店舗を決める。最後のチェックから5分以内は選び直しとして、このトリップのチェックを
-  // 新しい店舗へ付け替える。過ぎていれば前のチェックはそのままで、以後を新しいトリップにする
-  selectStore(storeId: Id): void {
+  // 新しい店舗へ付け替える。過ぎていれば前のチェックはそのままで、以後を新しいトリップにする。
+  // リストの決まっていない店舗は、選んだリストに属させる
+  selectStore(listId: Id, storeId: Id): void {
     const now = this.#now();
-    const session = this.currentSession() ?? startSession(now);
+    this.#adoptStore(storeId, listId);
+    const session = this.currentSession(listId) ?? startSession(listId, now);
     if (session.storeId === storeId) {
       this.#saveSession({ ...session, touchedAt: now });
       return;
     }
     const checks = sessionChecks(this.#store.rows("items"), session);
     if (checks.length > 0 && !isStoreCorrection(checks, now)) {
-      this.#saveSession(startSession(now, storeId));
+      this.#saveSession(startSession(listId, now, storeId));
       return;
     }
     this.#store.commitNow(
@@ -195,8 +212,8 @@ export class Repository {
     this.#saveSession(reviewDirection(next, this.#learnedOrder(storeId), this.#store.rows("items")));
   }
 
-  setDirection(direction: ListDirection): void {
-    this.#saveSession(withManualDirection(this.currentSession() ?? startSession(this.#now()), direction));
+  setDirection(listId: Id, direction: ListDirection): void {
+    this.#saveSession(withManualDirection(this.currentSession(listId) ?? startSession(listId, this.#now()), direction));
   }
 
   // 終わったトリップの品目を History へ移す。移した品目の数を返す
@@ -219,18 +236,66 @@ export class Repository {
     return changes.length;
   }
 
-  // --- 店舗 ---
-
-  // 同じ名前(normalizeItemName で同じ)の店舗を探す
-  findStore(name: string): Store | undefined {
-    const key = normalizeItemName(name);
-    return this.#store.rows("stores").find((row) => normalizeItemName(row.name) === key);
+  // リストの無い店舗を手の順番ごと墓石にする。リストを消す前にほかの端末が足した分は、
+  // 消した端末からは見えないので、同期のたびに片付ける。消した店舗の数を返す
+  removeOrphanStores(): number {
+    const lists = new Set(this.#store.rows("lists").map((list) => list.id));
+    const orphans = new Set(
+      this.#store
+        .rows("stores")
+        .filter((store) => store.listId !== null && !lists.has(store.listId))
+        .map((store) => store.id),
+    );
+    this.#store.commitNow(this.#storeRemoval(orphans, this.#now()));
+    this.#forgetStores(orphans);
+    return orphans.size;
   }
 
-  // 同じ名前の店舗があれば足さず、その ID を返す
-  addStore(name: string, position: { lat: number; lng: number } | null): Id {
-    const existing = this.findStore(name);
-    if (existing) return existing.id;
+  // リストの決まっていない店舗を、チェックの記録から最後に使ったリストへ属させる。
+  // 消えたリストの記録は見ない。埋めた店舗の数を返す
+  assignStoreLists(): number {
+    const unassigned = this.#store.rows("stores").filter((store) => store.listId === null);
+    if (unassigned.length === 0) return 0;
+    const lists = new Set(this.#store.rows("lists").map((list) => list.id));
+    const lastUsed = new Map<Id, { listId: Id; at: number }>();
+    const note = (storeId: Id | null, listId: Id, checkedAt: Iso | null) => {
+      if (storeId === null || checkedAt === null || !lists.has(listId)) return;
+      const at = Date.parse(checkedAt);
+      if (at > (lastUsed.get(storeId)?.at ?? -Infinity)) lastUsed.set(storeId, { listId, at });
+    };
+    for (const row of this.#store.rows("history")) note(row.storeId, row.listId, row.checkedAt);
+    for (const row of this.#store.rows("items")) note(row.checkedStoreId, row.listId, row.checkedAt);
+    const updatedAt = this.#now();
+    const changes = unassigned.flatMap((store): LocalChange[] => {
+      const used = lastUsed.get(store.id);
+      return used ? [{ action: "put", table: "stores", row: { ...store, listId: used.listId, updatedAt } }] : [];
+    });
+    this.#store.commitNow(changes);
+    return changes.length;
+  }
+
+  // --- 店舗 ---
+
+  // リストの中で同じ名前(normalizeItemName で同じ)の店舗を探す。別のリストの店舗は別の店舗。
+  // リストの決まっていない店舗も、このリストで選べるので探す
+  findStore(listId: Id, name: string): Store | undefined {
+    const key = normalizeItemName(name);
+    const matches = storesForList(this.#store.rows("stores"), listId).filter((row) => normalizeItemName(row.name) === key);
+    return matches.find((row) => row.listId === listId) ?? matches[0];
+  }
+
+  #adoptStore(storeId: Id, listId: Id): void {
+    const store = this.#store.rows("stores").find((row) => row.id === storeId);
+    if (store?.listId === null) this.#store.commitNow([{ action: "put", table: "stores", row: { ...store, listId, updatedAt: this.#now() } }]);
+  }
+
+  // リストに同じ名前の店舗があれば足さず、その ID を返す
+  addStore(listId: Id, name: string, position: { lat: number; lng: number } | null): Id {
+    const existing = this.findStore(listId, name);
+    if (existing) {
+      this.#adoptStore(existing.id, listId);
+      return existing.id;
+    }
     const store: Store = {
       id: this.#newId(),
       name: name.trim(),
@@ -238,29 +303,42 @@ export class Repository {
       lng: position?.lng ?? null,
       createdAt: this.#now(),
       updatedAt: this.#now(),
+      listId,
     };
     this.#store.commitNow([{ action: "put", table: "stores", row: store }]);
     return store.id;
   }
 
-  updateStore(id: Id, patch: Partial<Pick<Store, "name" | "lat" | "lng">>): void {
+  updateStore(id: Id, patch: Partial<Pick<Store, "name" | "lat" | "lng" | "listId">>): void {
     const store = this.#store.rows("stores").find((row) => row.id === id);
-    if (store) this.#store.commitNow([{ action: "put", table: "stores", row: { ...store, ...patch, updatedAt: this.#now() } }]);
+    if (!store) return;
+    this.#store.commitNow([{ action: "put", table: "stores", row: { ...store, ...patch, updatedAt: this.#now() } }]);
+    // 別のリストへ移した店舗を、前のリストの買い物に残さない
+    const session = this.session();
+    if (patch.listId && session?.storeId === id && session.listId !== patch.listId) this.#forgetStores(new Set([id]));
   }
 
-  // 品目の参照と手の順番も外す(シートのプルダウンの参照先が無くならないように)。History は残す
   deleteStore(id: Id): void {
-    const at = this.#now();
-    const items = this.#store.rows("items").filter((item) => item.checkedStoreId === id);
-    const hasOrder = this.#store.rows("storeOrders").some((row) => row.storeId === id);
-    const order: LocalChange[] = hasOrder ? [{ action: "delete", table: "storeOrders", id, at }] : [];
-    this.#store.commitNow([
+    const stores = new Set([id]);
+    this.#store.commitNow(this.#storeRemoval(stores, this.#now()));
+    this.#forgetStores(stores);
+  }
+
+  // 店舗を消す変更。品目の参照と手の順番も外す(シートのプルダウンの参照先が無くならないように)。
+  // History は残す
+  #storeRemoval(stores: ReadonlySet<Id>, at: Iso): LocalChange[] {
+    const items = this.#store.rows("items").filter((item) => item.checkedStoreId !== null && stores.has(item.checkedStoreId));
+    const orders = this.#store.rows("storeOrders").filter((row) => stores.has(row.storeId));
+    return [
       ...items.map((item): LocalChange => ({ action: "put", table: "items", row: { ...item, checkedStoreId: null, checkedUpdatedAt: at } })),
-      ...order,
-      { action: "delete", table: "stores", id, at },
-    ]);
+      ...orders.map((row): LocalChange => ({ action: "delete", table: "storeOrders", id: row.storeId, at })),
+      ...[...stores].map((id): LocalChange => ({ action: "delete", table: "stores", id, at })),
+    ];
+  }
+
+  #forgetStores(stores: ReadonlySet<Id>): void {
     const session = this.session();
-    if (session?.storeId === id) this.#saveSession({ ...session, storeId: null });
+    if (session?.storeId && stores.has(session.storeId)) this.#saveSession({ ...session, storeId: null });
   }
 
   saveStoreOrder(storeId: Id, categoryIds: Id[]): void {

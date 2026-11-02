@@ -1,4 +1,4 @@
-import { HOUR_MS, MemoryLocalStore, MemoryRemoteStore, STORE_CORRECTION_MS, SyncEngine, TRIP_GAP_MS, type Id, type Item } from "@shopping-list/core";
+import { HOUR_MS, MemoryLocalStore, MemoryRemoteStore, STORE_CORRECTION_MS, SyncEngine, TRIP_GAP_MS, type Id, type Item, type LocalChange, type Store } from "@shopping-list/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { SqliteLocalStore } from "./localStore.ts";
@@ -158,7 +158,7 @@ describe("Repository", () => {
 
   it("向きを先に切り替えても、最初のチェックで店舗を聞く", () => {
     const [a, b] = [add("品物1"), add("品物2")];
-    repo.setDirection("desc");
+    repo.setDirection("list", "desc");
     expect(repo.checkItem(a?.id ?? "")).toBe(true);
     // スキップしたら聞き直さない
     expect(repo.checkItem(b?.id ?? "")).toBe(false);
@@ -175,8 +175,8 @@ describe("Repository", () => {
     const [a, b] = [add("品物1"), add("品物2")];
     expect(repo.checkItem(a?.id ?? "")).toBe(true);
     expect(itemOf(a?.id ?? "")?.checkedStoreId).toBeNull();
-    const storeId = repo.addStore("架空の店", null);
-    repo.selectStore(storeId);
+    const storeId = repo.addStore("list", "架空の店", null);
+    repo.selectStore("list", storeId);
     expect(itemOf(a?.id ?? "")?.checkedStoreId).toBe(storeId);
     expect(repo.checkItem(b?.id ?? "")).toBe(false);
     expect(itemOf(b?.id ?? "")?.checkedStoreId).toBe(storeId);
@@ -191,7 +191,7 @@ describe("Repository", () => {
 
   it("チェックの前に向きを切り替えても、最初のチェックで店舗を聞く", () => {
     const [a, b] = [add("品物1"), add("品物2")];
-    repo.setDirection("desc");
+    repo.setDirection("list", "desc");
     expect(repo.checkItem(a?.id ?? "")).toBe(true);
     expect(repo.checkItem(b?.id ?? "")).toBe(false);
   });
@@ -206,36 +206,36 @@ describe("Repository", () => {
   it("店舗を選び直すと、このトリップのチェックを付け替える", () => {
     const item = add("品物");
     repo.checkItem(item?.id ?? "");
-    const [first, second] = [repo.addStore("店1", null), repo.addStore("店2", null)];
-    repo.selectStore(first);
-    repo.selectStore(second);
+    const [first, second] = [repo.addStore("list", "店1", null), repo.addStore("list", "店2", null)];
+    repo.selectStore("list", first);
+    repo.selectStore("list", second);
     expect(itemOf(item?.id ?? "")?.checkedStoreId).toBe(second);
   });
 
   it("最後のチェックから5分以内は付け替える", () => {
     const item = add("品物");
-    const [first, second] = [repo.addStore("店1", null), repo.addStore("店2", null)];
-    repo.selectStore(first);
+    const [first, second] = [repo.addStore("list", "店1", null), repo.addStore("list", "店2", null)];
+    repo.selectStore("list", first);
     repo.checkItem(item?.id ?? "");
     clock += STORE_CORRECTION_MS;
-    repo.selectStore(second);
+    repo.selectStore("list", second);
     expect(itemOf(item?.id ?? "")?.checkedStoreId).toBe(second);
-    expect(repo.currentSession()?.storeId).toBe(second);
+    expect(repo.currentSession("list")?.storeId).toBe(second);
   });
 
   it("5分を超えたら、前のチェックはそのままで以後を新しいトリップにする", () => {
     const [a, b] = [add("品物1"), add("品物2")];
-    const [first, second, third] = [repo.addStore("店1", null), repo.addStore("店2", null), repo.addStore("店3", null)];
-    repo.selectStore(first);
+    const [first, second, third] = [repo.addStore("list", "店1", null), repo.addStore("list", "店2", null), repo.addStore("list", "店3", null)];
+    repo.selectStore("list", first);
     repo.checkItem(a?.id ?? "");
     const before = itemOf(a?.id ?? "");
-    repo.setDirection("desc");
+    repo.setDirection("list", "desc");
     clock += STORE_CORRECTION_MS + 1;
 
-    repo.selectStore(second);
+    repo.selectStore("list", second);
     expect(itemOf(a?.id ?? "")).toBe(before);
-    expect(repo.currentSession()?.startedAt).toBe(new Date(clock).toISOString());
-    expect(repo.currentSession()?.direction.direction).toBe("asc");
+    expect(repo.currentSession("list")?.startedAt).toBe(new Date(clock).toISOString());
+    expect(repo.currentSession("list")?.direction.direction).toBe("asc");
 
     clock += 1000;
     expect(repo.checkItem(b?.id ?? "")).toBe(false);
@@ -243,26 +243,26 @@ describe("Repository", () => {
 
     // 新しいトリップの訂正は、前の店舗のチェックに触らない
     clock += 1000;
-    repo.selectStore(third);
+    repo.selectStore("list", third);
     expect(itemOf(a?.id ?? "")?.checkedStoreId).toBe(first);
     expect(itemOf(b?.id ?? "")?.checkedStoreId).toBe(third);
   });
 
   it("同じ店舗を選び直しても、トリップは切れない", () => {
     const item = add("品物");
-    const storeId = repo.addStore("店1", null);
-    repo.selectStore(storeId);
+    const storeId = repo.addStore("list", "店1", null);
+    repo.selectStore("list", storeId);
     repo.checkItem(item?.id ?? "");
-    const startedAt = repo.currentSession()?.startedAt;
+    const startedAt = repo.currentSession("list")?.startedAt;
     clock += STORE_CORRECTION_MS + 1;
-    repo.selectStore(storeId);
-    expect(repo.currentSession()?.startedAt).toBe(startedAt);
+    repo.selectStore("list", storeId);
+    expect(repo.currentSession("list")?.startedAt).toBe(startedAt);
   });
 
   it("チェックの変更は checkedUpdatedAt だけ、ほかの編集は updatedAt だけを進める", () => {
     const item = add("品物", "a");
     const id = item?.id ?? "";
-    const storeId = repo.addStore("店1", null);
+    const storeId = repo.addStore("list", "店1", null);
     const created = new Date(clock).toISOString();
     clock += 1000;
     repo.checkItem(id);
@@ -278,7 +278,7 @@ describe("Repository", () => {
 
     const updatedAt = itemOf(id)?.updatedAt;
     clock += 1000;
-    repo.selectStore(storeId);
+    repo.selectStore("list", storeId);
     repo.deleteStore(storeId);
     clock += 1000;
     repo.uncheckItem(id);
@@ -288,22 +288,22 @@ describe("Repository", () => {
 
   it("順番を学んでいない店舗では向きを自動で切り替えない", () => {
     order = null;
-    const storeId = repo.addStore("架空の店", null);
-    repo.selectStore(storeId);
+    const storeId = repo.addStore("list", "架空の店", null);
+    repo.selectStore("list", storeId);
     for (const categoryId of ["c", "b", "a"]) {
       clock += 60_000;
       repo.checkItem(add(`品物${categoryId}`, categoryId)?.id ?? "");
     }
-    expect(repo.currentSession()?.direction).toMatchObject({ direction: "asc", autoSwitched: false });
+    expect(repo.currentSession("list")?.direction).toMatchObject({ direction: "asc", autoSwitched: false });
   });
 
   it("同じ名前の店舗は新しく登録せず、既存を使う", () => {
-    const id = repo.addStore("マルサン", { lat: 1, lng: 2 });
-    expect(repo.addStore(" まるさん ", { lat: 3, lng: 4 })).toBe(id);
+    const id = repo.addStore("list", "マルサン", { lat: 1, lng: 2 });
+    expect(repo.addStore("list", " まるさん ", { lat: 3, lng: 4 })).toBe(id);
     expect(store.rows("stores")).toHaveLength(1);
     expect(store.rows("stores")[0]).toMatchObject({ name: "マルサン", lat: 1, lng: 2 });
-    expect(repo.findStore("まるさん")?.id).toBe(id);
-    expect(repo.addStore("別の店", null)).not.toBe(id);
+    expect(repo.findStore("list", "まるさん")?.id).toBe(id);
+    expect(repo.addStore("list", "別の店", null)).not.toBe(id);
   });
 
   it("リストの無い品目を墓石にする", () => {
@@ -333,30 +333,30 @@ describe("Repository", () => {
   });
 
   it("逆回りのチェックが3カテゴリに届くと、自動で降順にする", () => {
-    const storeId = repo.addStore("架空の店", null);
-    repo.selectStore(storeId);
+    const storeId = repo.addStore("list", "架空の店", null);
+    repo.selectStore("list", storeId);
     for (const categoryId of ["c", "b", "a"]) {
       clock += 60_000;
       repo.checkItem(add(`品物${categoryId}`, categoryId)?.id ?? "");
     }
-    expect(repo.currentSession()?.direction).toMatchObject({ direction: "desc", autoSwitched: true });
+    expect(repo.currentSession("list")?.direction).toMatchObject({ direction: "desc", autoSwitched: true });
   });
 
   it("手で向きを切り替えたら、そのトリップでは自動で切り替えない", () => {
-    const storeId = repo.addStore("架空の店", null);
-    repo.selectStore(storeId);
-    repo.setDirection("asc");
+    const storeId = repo.addStore("list", "架空の店", null);
+    repo.selectStore("list", storeId);
+    repo.setDirection("list", "asc");
     for (const categoryId of ["c", "b", "a"]) {
       clock += 60_000;
       repo.checkItem(add(`品物${categoryId}`, categoryId)?.id ?? "");
     }
-    expect(repo.currentSession()?.direction.direction).toBe("asc");
+    expect(repo.currentSession("list")?.direction.direction).toBe("asc");
   });
 
   it("終わったトリップを History へ移す。店舗の無いチェックも移す", () => {
     const [a, b, open] = [add("品物1", "a"), add("品物2", "b"), add("未チェック")];
-    const storeId = repo.addStore("架空の店", null);
-    repo.selectStore(storeId);
+    const storeId = repo.addStore("list", "架空の店", null);
+    repo.selectStore("list", storeId);
     repo.checkItem(a?.id ?? "");
     clock += 1000;
     repo.checkItem(b?.id ?? "");
@@ -382,14 +382,14 @@ describe("Repository", () => {
 
   it("店舗を消すと、品目の参照と手の順番も外す", () => {
     const item = add("品物");
-    const storeId = repo.addStore("架空の店", null);
+    const storeId = repo.addStore("list", "架空の店", null);
     repo.checkItem(item?.id ?? "");
-    repo.selectStore(storeId);
+    repo.selectStore("list", storeId);
     repo.saveStoreOrder(storeId, ["a"]);
     repo.deleteStore(storeId);
     expect(store.rows("storeOrders")).toEqual([]);
     expect(itemOf(item?.id ?? "")?.checkedStoreId).toBeNull();
-    expect(repo.currentSession()?.storeId).toBeNull();
+    expect(repo.currentSession("list")?.storeId).toBeNull();
   });
 
   it("カテゴリを消すと品目は未分類に戻る", () => {
@@ -410,6 +410,214 @@ describe("Repository", () => {
   it("時間が空いた買い物の状態は無いものとして扱う", () => {
     repo.checkItem(add("品物")?.id ?? "");
     clock += 4 * HOUR_MS;
-    expect(repo.currentSession()).toBeNull();
+    expect(repo.currentSession("list")).toBeNull();
+  });
+
+  describe("リストごとの店舗", () => {
+    const stored = (id: Id) => store.rows("stores").find((row) => row.id === id);
+    // リストの決まっていない店舗。版を上げる前に登録したもの
+    const unassigned = (id: Id): Store => ({
+      id,
+      name: id,
+      lat: null,
+      lng: null,
+      createdAt: "2027-01-01T00:00:00.000Z",
+      updatedAt: "2027-01-01T00:00:00.000Z",
+      listId: null,
+    });
+    const putStore = (row: Store) => store.commitNow([{ action: "put", table: "stores", row }]);
+    const history = (id: Id, listId: Id, storeId: Id | null, checkedAt: string): LocalChange => ({
+      action: "put",
+      table: "history",
+      row: { id, listId, name: "品物", categoryId: null, categorySource: null, storeId, tripId: null, checkedAt, checkedSeq: 0 },
+    });
+
+    it("新しい店舗はそのリストに属する", () => {
+      expect(stored(repo.addStore("list", "店", null))?.listId).toBe("list");
+    });
+
+    it("別のリストなら同じ名前を別の店舗として持てる", () => {
+      const a = repo.addStore("list", "店", null);
+      const b = repo.addStore("other", "店", null);
+      expect(b).not.toBe(a);
+      expect(repo.findStore("list", "店")?.id).toBe(a);
+      expect(repo.findStore("other", "店")?.id).toBe(b);
+      expect(repo.findStore("third", "店")).toBeUndefined();
+    });
+
+    it("同じ名前の店舗はそのリストのものを先に見つける", () => {
+      putStore({ ...unassigned("old"), name: "店" });
+      const mine = { ...unassigned("mine"), name: "店", listId: "list" };
+      putStore(mine);
+      expect(repo.findStore("list", "店")?.id).toBe("mine");
+    });
+
+    it("リストの決まっていない店舗を選ぶと、そのリストに属する", () => {
+      putStore(unassigned("old"));
+      repo.selectStore("list", "old");
+      expect(stored("old")?.listId).toBe("list");
+      expect(store.rows("stores")).toHaveLength(1);
+    });
+
+    it("リストの決まっていない店舗と同じ名前で登録すると、足さずに属させる", () => {
+      putStore({ ...unassigned("old"), name: "店" });
+      expect(repo.addStore("list", "店", null)).toBe("old");
+      expect(stored("old")?.listId).toBe("list");
+    });
+
+    it("チェックの記録から、最後に使ったリストを埋める", () => {
+      repo.addList("リスト");
+      const [early, late] = store.rows("lists").map((row) => row.id).concat(repo.addList("新しいリスト"));
+      putStore(unassigned("old"));
+      putStore(unassigned("unused"));
+      store.commitNow([
+        history("h1", late as Id, "old", "2027-01-01T00:00:00.000Z"),
+        history("h2", early as Id, "old", "2027-02-01T00:00:00.000Z"),
+      ]);
+      const pending = store.pendingCountNow();
+
+      expect(repo.assignStoreLists()).toBe(1);
+
+      expect(stored("old")?.listId).toBe(early);
+      expect(stored("unused")?.listId).toBeNull();
+      expect(store.pendingCountNow()).toBe(pending + 1);
+      expect(repo.assignStoreLists()).toBe(0);
+    });
+
+    it("品目のチェックも見て、履歴より新しければそのリストにする", () => {
+      const [first, second] = [repo.addList("一"), repo.addList("二")];
+      putStore(unassigned("old"));
+      store.commitNow([history("h1", first, "old", "2027-01-01T00:00:00.000Z")]);
+      const item = repo.addItem(second, "品物", NONE);
+      store.commitNow([
+        { action: "put", table: "items", row: { ...(item as Item), checked: true, checkedAt: "2027-02-01T00:00:00.000Z", checkedStoreId: "old" } },
+      ]);
+      repo.assignStoreLists();
+      expect(stored("old")?.listId).toBe(second);
+    });
+
+    it("消えたリストの記録では埋めない", () => {
+      const listId = repo.addList("残るリスト");
+      putStore(unassigned("old"));
+      store.commitNow([
+        history("h1", listId, "old", "2027-01-01T00:00:00.000Z"),
+        history("h2", "deleted-list", "old", "2027-02-01T00:00:00.000Z"),
+      ]);
+      repo.assignStoreLists();
+      expect(stored("old")?.listId).toBe(listId);
+    });
+
+    it("リストを消すと店舗と手の順番も消え、ほかのリストの参照を外し、履歴は残す", () => {
+      const [gone, kept] = [repo.addList("消すリスト"), repo.addList("残るリスト")];
+      const storeId = repo.addStore(gone, "店", null);
+      const other = repo.addStore(kept, "別の店", null);
+      repo.saveStoreOrder(storeId, ["a"]);
+      repo.saveStoreOrder(other, ["a"]);
+      const item = repo.addItem(kept, "品物", NONE);
+      store.commitNow([
+        { action: "put", table: "items", row: { ...(item as Item), checked: true, checkedAt: "2027-02-01T00:00:00.000Z", checkedStoreId: storeId } },
+        history("h1", gone, storeId, "2027-01-01T00:00:00.000Z"),
+      ]);
+
+      repo.deleteList(gone);
+
+      expect(store.rows("stores").map((row) => row.id)).toEqual([other]);
+      expect(store.rows("storeOrders").map((row) => row.storeId)).toEqual([other]);
+      expect(itemOf(item?.id ?? "")?.checkedStoreId).toBeNull();
+      expect(store.rows("history")).toHaveLength(1);
+    });
+
+    it("消したリストの買い物の状態を残さない", () => {
+      const listId = repo.addList("リスト");
+      repo.selectStore(listId, repo.addStore(listId, "店", null));
+      repo.deleteList(listId);
+      expect(repo.session()).toBeNull();
+    });
+
+    it("リストの無い店舗を手の順番ごと片付ける。リストの決まっていない店舗は残す", () => {
+      const listId = repo.addList("リスト");
+      const kept = repo.addStore(listId, "残る店", null);
+      putStore({ ...unassigned("orphan"), listId: "deleted-list" });
+      putStore(unassigned("old"));
+      repo.saveStoreOrder("orphan", ["a"]);
+
+      expect(repo.removeOrphanStores()).toBe(1);
+
+      expect(store.rows("stores").map((row) => row.id).sort()).toEqual([kept, "old"].sort());
+      expect(store.rows("storeOrders")).toEqual([]);
+      expect(repo.removeOrphanStores()).toBe(0);
+    });
+
+    it("店舗を別のリストへ移すと、前のリストの買い物から外れる", () => {
+      const storeId = repo.addStore("list", "店", null);
+      repo.selectStore("list", storeId);
+      repo.updateStore(storeId, { listId: "other" });
+      expect(stored(storeId)?.listId).toBe("other");
+      expect(repo.currentSession("list")?.storeId).toBeNull();
+    });
+  });
+
+  describe("リストごとの買い物", () => {
+    const addTo = (listId: Id, name: string) => repo.addItem(listId, name, NONE)?.id ?? "";
+
+    it("別のリストではセッションなしとして扱う", () => {
+      repo.selectStore("list", repo.addStore("list", "店", null));
+      expect(repo.currentSession("list")).not.toBeNull();
+      expect(repo.currentSession("other")).toBeNull();
+      expect(repo.isShopping()).toBe(true);
+    });
+
+    it("別のリストのチェックには前のリストの店舗を付けず、店舗を聞く", () => {
+      repo.selectStore("list", repo.addStore("list", "店", null));
+      const id = addTo("other", "品物");
+      expect(repo.checkItem(id)).toBe(true);
+      expect(itemOf(id)?.checkedStoreId).toBeNull();
+      expect(repo.currentSession("other")?.storeId).toBeNull();
+    });
+
+    it("別のリストのチェックがあっても、このリストの最初のチェックで店舗を聞く", () => {
+      repo.setDirection("list", "desc");
+      store.commitNow([
+        {
+          action: "put",
+          table: "items",
+          row: { ...itemRow("elsewhere", "other"), checked: true, checkedAt: new Date(clock).toISOString() },
+        },
+      ]);
+      expect(repo.checkItem(addTo("list", "品物"))).toBe(true);
+    });
+
+    it("別のリストの向きを引き継がない", () => {
+      repo.setDirection("list", "desc");
+      expect(repo.currentSession("other")).toBeNull();
+      repo.setDirection("other", "asc");
+      expect(repo.currentSession("other")?.direction.direction).toBe("asc");
+      expect(repo.currentSession("list")).toBeNull();
+    });
+
+    it("店舗を替えても、別のリストのチェックを付け替えない", () => {
+      const [first, second] = [repo.addStore("list", "店1", null), repo.addStore("list", "店2", null)];
+      const elsewhere: Item = { ...itemRow("elsewhere", "other"), checked: true, checkedAt: new Date(clock).toISOString(), checkedStoreId: first };
+      store.commitNow([{ action: "put", table: "items", row: elsewhere }]);
+      repo.selectStore("list", first);
+      repo.selectStore("list", second);
+      expect(itemOf("elsewhere")?.checkedStoreId).toBe(first);
+    });
+
+    it("listId の無い保存済みの状態は無視する", () => {
+      const at = new Date(clock).toISOString();
+      store.setSetting("shoppingSession", JSON.stringify({ storeId: "x", startedAt: at, touchedAt: at, direction: {} }));
+      expect(repo.session()).toBeNull();
+      expect(repo.currentSession("list")).toBeNull();
+      expect(repo.isShopping()).toBe(false);
+    });
+
+    it("近くの店で始めると、トリップの最初のチェックで店舗を聞かない", () => {
+      const storeId = repo.addStore("list", "店", null);
+      const id = addTo("list", "品物");
+      repo.selectStore("list", storeId);
+      expect(repo.checkItem(id)).toBe(false);
+      expect(itemOf(id)?.checkedStoreId).toBe(storeId);
+    });
   });
 });

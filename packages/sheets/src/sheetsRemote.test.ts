@@ -16,6 +16,7 @@ import {
   createSpreadsheet,
   ensureSpreadsheet,
   surveySpreadsheet,
+  upgradeSpreadsheet,
 } from "./setup.ts";
 import { SheetsRemote, openSpreadsheet } from "./sheetsRemote.ts";
 
@@ -211,6 +212,122 @@ describe("SheetsRemote", () => {
       expect(server.calls.some((call) => call.url.endsWith("/spreadsheets"))).toBe(false);
       expect(server.sheets.some((sheet) => sheet.title === "Sheet1")).toBe(false);
       await expect(openSpreadsheet(client, created.spreadsheetId)).resolves.toBeDefined();
+    });
+  });
+
+  describe("前の版のシートを上げる", () => {
+    const STORE_V3 = ["store1", "架空の店", 1.5, 2.5, T(0), T(0), null];
+    // 前の版のアプリが作った形に戻す
+    const downgrade = () => {
+      const stores = server.sheet("Stores");
+      stores.columnCount = 7;
+      stores.grid = [stores.grid[0]?.slice(0, 7) ?? [], [...STORE_V3]];
+      server.sheet("Meta").grid[1] = [3];
+      server.requests.length = 0;
+      server.calls.length = 0;
+    };
+    const expectUpgraded = () => {
+      const stores = server.sheet("Stores");
+      expect(stores.columnCount).toBe(8);
+      expect(stores.grid[0]?.slice(5)).toEqual(["updated_at", "deleted_at", "list_id"]);
+      expect(stores.grid[1]?.slice(0, 7)).toEqual(STORE_V3);
+      expect(server.sheet("Meta").grid[1]).toEqual([SCHEMA_VERSION]);
+    };
+
+    beforeEach(downgrade);
+
+    it("同期の前に上げ、列をずらさず、行を読める", async () => {
+      const { engine, local } = device();
+      const result = await engine.sync();
+      expect(result.status).toBe("ok");
+      expectUpgraded();
+      expect(local.rows.stores.get("store1")).toMatchObject({ name: "架空の店", lat: 1.5, listId: null });
+    });
+
+    it("足した列にだけプルダウンと文字の書式を掛ける", async () => {
+      await device().engine.sync();
+      const validations = server.requests.flatMap((r) => (r.setDataValidation ? [r.setDataValidation] : []));
+      expect(validations).toHaveLength(1);
+      expect(validations[0]).toMatchObject({
+        range: { sheetId: server.sheet("Stores").sheetId, startColumnIndex: 7, endColumnIndex: 8 },
+        rule: { condition: { type: "ONE_OF_RANGE", values: [{ userEnteredValue: "=Lists!$A$2:$A" }] } },
+      });
+      expect(server.requests.filter((r) => r.repeatCell)).toHaveLength(1);
+    });
+
+    it("1回の batchUpdate で上げ、2回目は何も書かない", async () => {
+      await device().engine.sync();
+      const writes = server.count(":batchUpdate");
+      expect(writes).toBe(1);
+      server.calls.length = 0;
+      await device().engine.sync();
+      expect(server.count(":batchUpdate")).toBe(0);
+      expectUpgraded();
+    });
+
+    it("2台が同時に上げても壊れない。先に上げた端末の書いた行も残る", async () => {
+      const first = await surveySpreadsheet(client, spreadsheetId);
+      const second = await surveySpreadsheet(client, spreadsheetId);
+      expect([first.outdated, second.outdated]).toEqual([true, true]);
+
+      await upgradeSpreadsheet(client, spreadsheetId, first);
+      const stores = server.sheet("Stores");
+      stores.grid.push(["store2", "別の店", null, null, T(1), T(1), null, "list1"]);
+      await upgradeSpreadsheet(client, spreadsheetId, second);
+
+      expectUpgraded();
+      expect(stores.grid[2]?.[7]).toBe("list1");
+      expect(stores.grid).toHaveLength(3);
+      await expect(surveySpreadsheet(client, spreadsheetId)).resolves.toMatchObject({ outdated: false });
+    });
+
+    it("手で列を足したシートの列の数を減らさない", async () => {
+      server.sheet("Stores").columnCount = 12;
+      await device().engine.sync();
+      expect(server.sheet("Stores").columnCount).toBe(12);
+    });
+
+    it("足す列の場所が使われていれば、触らずに止める", async () => {
+      const stores = server.sheet("Stores");
+      stores.columnCount = 8;
+      stores.grid[0]?.push("メモ");
+      const result = await device().engine.sync();
+      expect(result.error?.kind).toBe("schema");
+      expect(server.count(":batchUpdate")).toBe(0);
+    });
+
+    it("書き込みが拒否されたら版は上がらず、次に上げ直せる", async () => {
+      server.rejects = (request) => "updateSheetProperties" in request;
+      const { engine } = device();
+      expect((await engine.sync()).status).toBe("failed");
+      expect(server.sheet("Meta").grid[1]).toEqual([3]);
+      expect(server.sheet("Stores").columnCount).toBe(7);
+
+      server.rejects = null;
+      await engine.sync();
+      expectUpgraded();
+    });
+
+    it("上げた後は list_id を読み書きできる", async () => {
+      const { engine, local } = device();
+      await engine.sync();
+      const row = local.rows.stores.get("store1");
+      await local.commit([
+        { action: "put", table: "stores", row: { ...(row as NonNullable<typeof row>), listId: "list1", updatedAt: T(5) } },
+      ]);
+      await engine.sync();
+      expect(server.sheet("Stores").grid[1]?.[7]).toBe("list1");
+      const other = device();
+      await other.engine.sync();
+      expect(other.local.rows.stores.get("store1")?.listId).toBe("list1");
+    });
+
+    it("足りないシートを足すときも一緒に上げる", async () => {
+      const index = server.sheets.findIndex((sheet) => sheet.title === "History");
+      server.sheets.splice(index, 1);
+      await ensureSpreadsheet(client, spreadsheetId);
+      expectUpgraded();
+      expect(server.sheet("History").grid[0]?.[0]).toBe("id");
     });
   });
 

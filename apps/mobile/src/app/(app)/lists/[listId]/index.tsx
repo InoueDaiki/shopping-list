@@ -30,7 +30,7 @@ export default function ListScreen() {
   const lists = useTable("lists");
   const categories = useTable("categories");
   const stores = useTable("stores");
-  const session = useShopping();
+  const session = useShopping(listId);
   const storeId = session?.storeId ?? null;
   const direction = session?.direction.direction ?? "asc";
   const sections = useSections(listId, storeId, direction);
@@ -102,7 +102,7 @@ export default function ListScreen() {
               icon
               variant="ghost"
               accessibilityLabel={descending ? "降順。昇順に切り替える" : "昇順。降順に切り替える"}
-              onPress={() => repository.setDirection(descending ? "asc" : "desc")}
+              onPress={() => repository.setDirection(listId, descending ? "asc" : "desc")}
             >
               <Icon icon={descending ? ArrowUpNarrowWide : ArrowDownNarrowWide} size={22} />
             </Button>
@@ -148,7 +148,7 @@ export default function ListScreen() {
           onEdit(item.id);
         }}
       />
-      <StoreSheet open={storeOpen} onClose={() => setStoreOpen(false)} />
+      <StoreSheet listId={listId} open={storeOpen} onClose={() => setStoreOpen(false)} />
     </KeyboardAvoidingView>
   );
 }

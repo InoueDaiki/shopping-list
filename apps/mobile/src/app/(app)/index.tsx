@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
 import { NamePrompt } from "../../components/NamePrompt.tsx";
+import { NearbyShopping } from "../../components/NearbyShopping.tsx";
 import { SyncNoticeBar } from "../../components/SyncNoticeBar.tsx";
 import { useTable } from "../../data/hooks.ts";
 import { repository } from "../../data/runtime.ts";
@@ -41,6 +42,7 @@ export default function Lists() {
           }
         />
         <SyncNoticeBar />
+        <NearbyShopping />
         {lists.length === 0 ? (
           <Text className="py-8 text-center text-fg-muted">リストがありません。下のボタンから追加してください。</Text>
         ) : (
@@ -100,7 +102,7 @@ export default function Lists() {
         open={deleting !== null}
         tone="danger"
         title={`「${deleting?.name ?? ""}」を削除しますか`}
-        description="リストの品目も一緒に削除します。元に戻せません。"
+        description="リストの品目と店舗も一緒に削除します。元に戻せません。"
         confirmLabel="削除する"
         onConfirm={() => {
           if (deleting) repository.deleteList(deleting.id);

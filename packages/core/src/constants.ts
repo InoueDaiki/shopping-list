@@ -44,6 +44,8 @@ export const SUGGESTION_LIMIT = 8;
 
 // 店舗: 近いとみなす距離
 export const NEARBY_STORE_RADIUS_M = 300;
+// 店舗: リスト一覧の買い物のボタンを出す距離。これより遠い店舗には今いないとみなす
+export const NEAREST_STORE_MAX_M = 20_000;
 // 地球の平均半径
 export const EARTH_RADIUS_M = 6_371_008.8;
 

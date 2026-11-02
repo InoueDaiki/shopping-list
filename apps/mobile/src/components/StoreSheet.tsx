@@ -1,4 +1,4 @@
-import { checksFromItems, storeCandidates, storeLastUsed, type GeoPoint, type Id } from "@shopping-list/core";
+import { checksFromItems, storeCandidates, storeLastUsed, storesForList, type GeoPoint, type Id } from "@shopping-list/core";
 import { Badge, Button, cx, Field, Input, Sheet, Text } from "@shopping-list/ui-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
@@ -9,12 +9,13 @@ import { repository } from "../data/runtime.ts";
 import { refinedPosition } from "../logic/storePosition.ts";
 
 interface StoreSheetProps {
+  listId: Id;
   open: boolean;
   onClose: () => void;
 }
 
 // 今の店舗を選ぶ。一覧は待たずに出し、位置が分かったら近い店舗を上へ動かす
-export function StoreSheet({ open, onClose }: StoreSheetProps) {
+export function StoreSheet({ listId, open, onClose }: StoreSheetProps) {
   const stores = useTable("stores");
   const items = useTable("items");
   const history = useTable("history");
@@ -34,24 +35,24 @@ export function StoreSheet({ open, onClose }: StoreSheetProps) {
       // 閉じている間はチェックのたびに計算しない
       open
         ? storeCandidates({
-            stores,
+            stores: storesForList(stores, listId),
             position,
             lastUsed: storeLastUsed([...history, ...checksFromItems(items)]),
           })
         : [],
-    [open, stores, position, history, items],
+    [open, listId, stores, position, history, items],
   );
 
   const select = (storeId: Id) => {
-    repository.selectStore(storeId);
+    repository.selectStore(listId, storeId);
     onClose();
   };
 
   const register = () => {
     if (name.trim() === "") return;
     // 同じ名前の店舗があれば登録せずに選ぶ。別の場所の位置で上書きしない
-    const known = repository.findStore(name);
-    const storeId = known?.id ?? repository.addStore(name, position);
+    const known = repository.findStore(listId, name);
+    const storeId = known?.id ?? repository.addStore(listId, name, position);
     select(storeId);
     if (known) return;
     // 測り終える前に登録したら、分かったときに位置を足す。手元の位置は前回の場所のことがある

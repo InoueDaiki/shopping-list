@@ -47,6 +47,7 @@ export function storeFixture(overrides: Partial<Store> = {}): Store {
     lng: null,
     createdAt: "2028-01-01T00:00:00.000Z",
     updatedAt: "2028-01-01T00:00:00.000Z",
+    listId: null,
     ...overrides,
   };
 }

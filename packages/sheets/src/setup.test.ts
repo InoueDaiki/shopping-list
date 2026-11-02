@@ -72,6 +72,15 @@ describe("buildSetupRequests", () => {
     ).toContain("REGEXMATCH(TO_TEXT(K2)");
   });
 
+  it("店舗のリストは空を許す Lists のプルダウン", () => {
+    const stores = TABLE_SHEETS.stores;
+    const index = stores.columns.findIndex((c) => c.name === "list_id");
+    expect(index).toBe(stores.columns.length - 1);
+    expect(ruleOn(stores.sheetId, index)).toMatchObject({
+      condition: { type: "ONE_OF_RANGE", values: [{ userEnteredValue: "=Lists!$A$2:$A" }] },
+    });
+  });
+
   it("行を持つ表は、History を除いて deleted_at を持つ", () => {
     const names = SHEETS.filter((def) => def.columns.some((c) => c.name === "deleted_at"));
     expect(names.map((def) => def.name)).toEqual([

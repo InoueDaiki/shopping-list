@@ -14,6 +14,8 @@ import {
 } from "@shopping-list/core";
 
 export interface ShoppingSession {
+  // 買い物をしているリスト。ほかのリストでは、この状態は無いものとして扱う
+  listId: Id;
   storeId: Id | null;
   // 始まった時刻。これより後のチェックがこのトリップの分
   startedAt: Iso;
@@ -22,13 +24,19 @@ export interface ShoppingSession {
   direction: TripDirection;
 }
 
-export function startSession(now: Iso, storeId: Id | null = null): ShoppingSession {
-  return { storeId, startedAt: now, touchedAt: now, direction: startTripDirection() };
+export function startSession(listId: Id, now: Iso, storeId: Id | null = null): ShoppingSession {
+  return { listId, storeId, startedAt: now, touchedAt: now, direction: startTripDirection() };
 }
 
 export function activeSession(session: ShoppingSession | null, now: Iso): ShoppingSession | null {
   if (!session) return null;
   return Date.parse(now) - Date.parse(session.touchedAt) <= TRIP_GAP_MS ? session : null;
+}
+
+// そのリストの買い物の状態。別のリストの買い物の店舗をこのリストのチェックに付けない
+export function sessionOfList(session: ShoppingSession | null, listId: Id, now: Iso): ShoppingSession | null {
+  const active = activeSession(session, now);
+  return active?.listId === listId ? active : null;
 }
 
 // このトリップで今の店舗についたチェックのカテゴリの順
@@ -43,7 +51,12 @@ function visitedCategories(items: readonly Item[], session: ShoppingSession): Id
 export function sessionChecks(items: readonly Item[], session: ShoppingSession): Item[] {
   const startedAt = Date.parse(session.startedAt);
   return items.filter(
-    (item) => item.checked && item.checkedAt !== null && item.checkedStoreId === session.storeId && Date.parse(item.checkedAt) >= startedAt,
+    (item) =>
+      item.listId === session.listId &&
+      item.checked &&
+      item.checkedAt !== null &&
+      item.checkedStoreId === session.storeId &&
+      Date.parse(item.checkedAt) >= startedAt,
   );
 }
 

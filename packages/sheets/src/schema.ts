@@ -2,7 +2,9 @@
 
 import type { SyncTable } from "@shopping-list/core";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
+// 自動で上げられる前の版。ADDED_COLUMNS の列を足すだけで SCHEMA_VERSION になる
+export const UPGRADABLE_VERSION = 3;
 
 export const ID_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
 export const ID_LIST_PATTERN = "^([A-Za-z0-9_-]{1,64}(,[A-Za-z0-9_-]{1,64})*)?$";
@@ -97,6 +99,8 @@ export const SHEETS: readonly SheetDef[] = [
       iso("created_at"),
       iso("updated_at"),
       iso("deleted_at"),
+      // 既存の行の列をずらさないよう、deleted_at の後に足した
+      ref("list_id", "Lists"),
     ],
   },
   {
@@ -180,6 +184,11 @@ export const ITEM_CHECK_COLUMNS = [
   "checked_updated_at",
 ] as const;
 
+// UPGRADABLE_VERSION から足した列。どれも各シートの末尾にある
+export const ADDED_COLUMNS: Partial<Record<SheetName, readonly string[]>> = {
+  Stores: ["list_id"],
+};
+
 // 列の位置。無い列は -1
 export function columnIndex(def: SheetDef, name: string): number {
   return def.columns.findIndex((column) => column.name === name);
@@ -200,7 +209,8 @@ export function dataRange(def: SheetDef, fromRow = 2): string {
   return `${def.name}!A${fromRow}:${last}`;
 }
 
-export function headerRange(def: SheetDef): string {
-  const last = columnLetter(def.columns.length - 1);
+// columnCount はシートの今の列の数。シートの外を指すと範囲ごと拒否されるので、その中に収める
+export function headerRange(def: SheetDef, columnCount = def.columns.length): string {
+  const last = columnLetter(Math.min(def.columns.length, columnCount) - 1);
   return `${def.name}!A1:${last}1`;
 }

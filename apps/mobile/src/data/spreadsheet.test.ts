@@ -1,5 +1,5 @@
 import { RemoteError } from "@shopping-list/core";
-import { SCHEMA_VERSION, SHEETS, type SheetsClient } from "@shopping-list/sheets";
+import { SCHEMA_VERSION, SHEETS, UPGRADABLE_VERSION, type SheetsClient } from "@shopping-list/sheets";
 import { describe, expect, it, vi } from "vitest";
 
 import { createSheet, initSheet, openExistingSheet, ReadOnlySheetError, sheetErrorMessage } from "./spreadsheet.ts";
@@ -14,15 +14,16 @@ interface FakeOptions {
   write?: () => Promise<unknown>;
   batchUpdate?: () => Promise<unknown>;
   create?: () => Promise<unknown>;
+  version?: number;
 }
 
 // 調べるときの読み取りを、アプリの形のシートとして返す
-function client({ titles = SHEETS.map((def) => def.name), write, batchUpdate, create }: FakeOptions = {}) {
+function client({ titles = SHEETS.map((def) => def.name), write, batchUpdate, create, version = SCHEMA_VERSION }: FakeOptions = {}) {
   return {
     get: async () => ({ sheets: titles.map((title, index) => ({ properties: { sheetId: index + 1, title } })) }),
     batchGet: async (_id: string, ranges: string[]) =>
       ranges.map((range) => ({
-        values: range.endsWith("!A2") ? [[SCHEMA_VERSION]] : [OK_HEADER(range.split("!")[0] as string)],
+        values: range.endsWith("!A2") ? [[version]] : [OK_HEADER(range.split("!")[0] as string)],
       })),
     valuesBatchUpdate: write ?? (async () => ({})),
     batchUpdate: batchUpdate ?? (async () => ({})),
@@ -68,6 +69,23 @@ describe("openExistingSheet", () => {
       throw new RemoteError("offline", "つながらない");
     };
     await expect(openExistingSheet(client({ write }), URL)).rejects.toMatchObject({ kind: "offline" });
+  });
+
+  it("前の版のシートは、版だけを書かずに上げて開く", async () => {
+    const write = vi.fn(async () => ({}));
+    const batchUpdate = vi.fn(async () => ({}));
+    const opened = await openExistingSheet(client({ version: UPGRADABLE_VERSION, write, batchUpdate }), URL);
+    expect(opened).toMatchObject({ kind: "ready" });
+    expect(batchUpdate).toHaveBeenCalledTimes(1);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("前の版のシートを上げられない権限なら、閲覧だけとして止める", async () => {
+    await expect(openExistingSheet(client({ version: UPGRADABLE_VERSION, batchUpdate: forbidden }), URL)).rejects.toBeInstanceOf(ReadOnlySheetError);
+  });
+
+  it("新しい版のシートは schema で止める", async () => {
+    await expect(openExistingSheet(client({ version: SCHEMA_VERSION + 1 }), URL)).rejects.toMatchObject({ kind: "schema" });
   });
 
   it("アプリの形でないシートは、書く前に確認に回す", async () => {

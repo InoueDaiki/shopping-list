@@ -102,13 +102,17 @@ export const syncRunner = new SyncRunner({
   afterSync: (result) => {
     repository.finishTrips();
     // 読めなかった回と、Lists の行を読めなかった回は、リストが無いと言い切れない
-    if (result.pulled && !result.issues.some((issue) => issue.table === "lists")) repository.removeOrphanItems();
-    syncRunner.setShopping(repository.currentSession() !== null);
+    if (result.pulled && !result.issues.some((issue) => issue.table === "lists")) {
+      repository.removeOrphanItems();
+      repository.assignStoreLists();
+      repository.removeOrphanStores();
+    }
+    syncRunner.setShopping(repository.isShopping());
   },
 });
 
 // 買い物中だけ30秒ごとに読む
-localStore.subscribe("settings", () => syncRunner.setShopping(repository.currentSession() !== null));
+localStore.subscribe("settings", () => syncRunner.setShopping(repository.isShopping()));
 
 if (config.demo) {
   seedDemo({ store: localStore, repository, categories: INITIAL_CATEGORIES, newId, now: new Date() });
