@@ -1,5 +1,5 @@
 import { Icon } from "@shopping-list/ui-native";
-import Trash2 from "lucide-react-native/icons/trash-2";
+import Trash from "lucide-react-native/icons/trash";
 import { type ReactNode, useMemo, useRef, useState } from "react";
 import { Animated, PanResponder, View } from "react-native";
 
@@ -57,8 +57,8 @@ export function SwipeToDelete({ label, onDelete, children }: SwipeToDeleteProps)
     >
       {width > 0 && (
         <View className="absolute inset-0 flex-row items-center justify-between bg-danger px-6">
-          <Icon icon={Trash2} size={22} color="on-danger" />
-          <Icon icon={Trash2} size={22} color="on-danger" />
+          <Icon icon={Trash} size={22} color="on-danger" />
+          <Icon icon={Trash} size={22} color="on-danger" />
         </View>
       )}
       <Animated.View style={{ transform: [{ translateX }] }} {...responder.panHandlers}>
