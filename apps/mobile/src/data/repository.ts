@@ -116,6 +116,13 @@ export class Repository {
     this.#store.commitNow([{ action: "put", table: "items", row: next }]);
   }
 
+  // 推定の結果を入れる。推定の途中で利用者が決めていたら上書きしない
+  applyInferredCategory(id: Id, categoryId: Id): void {
+    const item = this.#item(id);
+    if (!item || item.categoryId !== null) return;
+    this.#store.commitNow([{ action: "put", table: "items", row: { ...item, categoryId, categorySource: "inferred", updatedAt: this.#now() } }]);
+  }
+
   deleteItem(id: Id): void {
     this.#store.commitNow([{ action: "delete", table: "items", id, at: this.#now() }]);
   }

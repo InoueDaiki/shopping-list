@@ -1,5 +1,5 @@
 import type { Id, Item } from "@shopping-list/core";
-import { Button, Checkbox, Icon } from "@shopping-list/ui-native";
+import { Button, Checkbox, Icon, Text } from "@shopping-list/ui-native";
 import Pencil from "lucide-react-native/icons/pencil";
 import StickyNote from "lucide-react-native/icons/sticky-note";
 import { memo } from "react";
@@ -23,6 +23,7 @@ export const ItemRow = memo(function ItemRow({ item, onToggle, onMemo, onEdit }:
         checked={item.checked}
         onChange={(checked) => onToggle(item.id, checked)}
       />
+      {item.categorySource === "inferred" && <Text className="text-xs text-fg-muted">推定</Text>}
       {item.memo !== "" && (
         <Button icon variant="ghost" accessibilityLabel={`${item.name}のメモを見る`} onPress={() => onMemo(item)}>
           <Icon icon={StickyNote} size={20} color="accent-fg" />

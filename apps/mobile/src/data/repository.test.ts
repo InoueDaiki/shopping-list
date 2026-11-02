@@ -49,6 +49,42 @@ describe("Repository", () => {
     repo.addItem("list", name, categoryId ? { categoryId, categorySource: "history" } : NONE);
   const itemOf = (id: Id) => store.rows("items").find((row) => row.id === id);
 
+  describe("applyInferredCategory", () => {
+    it("未分類の品目に推定を入れ、版を進める", () => {
+      const item = add("架空の品物")!;
+      clock += 1000;
+      repo.applyInferredCategory(item.id, "a");
+      expect(itemOf(item.id)).toMatchObject({
+        categoryId: "a",
+        categorySource: "inferred",
+        updatedAt: new Date(clock).toISOString(),
+      });
+    });
+
+    it("すでにカテゴリがあれば上書きしない", () => {
+      const item = add("架空の品物")!;
+      repo.updateItem(item.id, { categoryId: "b" });
+      const decided = itemOf(item.id);
+      clock += 1000;
+      repo.applyInferredCategory(item.id, "a");
+      expect(itemOf(item.id)).toEqual(decided);
+    });
+
+    it("消えた品目には何もしない", () => {
+      const item = add("架空の品物")!;
+      repo.deleteItem(item.id);
+      repo.applyInferredCategory(item.id, "a");
+      expect(itemOf(item.id)).toBeUndefined();
+    });
+
+    it("推定の品目を利用者が直すと出どころが利用者になる", () => {
+      const item = add("架空の品物")!;
+      repo.applyInferredCategory(item.id, "a");
+      repo.updateItem(item.id, { categoryId: "b" });
+      expect(itemOf(item.id)?.categorySource).toBe("user");
+    });
+  });
+
   it("同じ名前がまだ買っていない状態であれば足さない", () => {
     expect(add(" にんじん ")?.name).toBe("にんじん");
     expect(add("ニンジン")).toBeNull();

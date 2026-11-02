@@ -1,3 +1,4 @@
+import { INFERENCE_DICTIONARY } from "@shopping-list/core";
 import { describe, expect, it } from "vitest";
 
 import { INITIAL_CATEGORIES, buildSetupRequests } from "./setup.ts";
@@ -122,5 +123,11 @@ describe("parseSpreadsheetId", () => {
     "",
   ])("%s は取り出さない", (input) => {
     expect(parseSpreadsheetId(input)).toBeNull();
+  });
+});
+
+describe("INITIAL_CATEGORIES", () => {
+  it("推定の辞書のキーは初期のカテゴリの名前と一致する", () => {
+    expect(Object.keys(INFERENCE_DICTIONARY).sort()).toEqual(INITIAL_CATEGORIES.map((c) => c.name).sort());
   });
 });

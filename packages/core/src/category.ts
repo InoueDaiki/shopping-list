@@ -80,7 +80,10 @@ export function lookupCategory(input: CategoryLookupInput): CategoryResolution {
     if (best === null || isStronger(candidate, best)) best = candidate;
   }
 
-  return best === null ? UNCATEGORIZED : { categoryId: best.categoryId, categorySource: "history" };
+  if (best === null) return UNCATEGORIZED;
+  // 推定の記録しか無いときは推定のまま渡す。履歴の出どころにすると強い記録に化ける
+  const categorySource = best.strength === SOURCE_STRENGTH.inferred ? "inferred" : "history";
+  return { categoryId: best.categoryId, categorySource };
 }
 
 // 同じリスト、ほかのリスト、推定、未分類の順で決める。

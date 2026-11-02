@@ -144,4 +144,17 @@ describe("lookupCategory", () => {
     expect(lookupCategory({ ...base, history }).categoryId).toBe("cat-meat");
     expect(lookupCategory(base).categoryId).toBeNull();
   });
+
+  it("推定の記録しか無ければ、出どころを推定のままにする", () => {
+    const items = [itemFixture({ categoryId: "cat-fish", categorySource: "inferred" })];
+    const history = [historyFixture({ categoryId: "cat-fish", categorySource: "inferred" })];
+    expect(lookupCategory({ ...base, items })).toEqual({ categoryId: "cat-fish", categorySource: "inferred" });
+    expect(lookupCategory({ ...base, history })).toEqual({ categoryId: "cat-fish", categorySource: "inferred" });
+  });
+
+  it("推定より強い記録があれば、出どころは履歴になる", () => {
+    const items = [itemFixture({ categoryId: "cat-fish", categorySource: "inferred" })];
+    const history = [historyFixture({ categoryId: "cat-meat", categorySource: "user" })];
+    expect(lookupCategory({ ...base, items, history })).toEqual({ categoryId: "cat-meat", categorySource: "history" });
+  });
 });
