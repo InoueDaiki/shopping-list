@@ -1,5 +1,5 @@
 import type { Id, Item } from "@shopping-list/core";
-import { Button, Checkbox, Icon } from "@shopping-list/ui-native";
+import { Button, Checkbox, cx, Icon } from "@shopping-list/ui-native";
 import Pencil from "lucide-react-native/icons/pencil";
 import StickyNote from "lucide-react-native/icons/sticky-note";
 import { memo } from "react";
@@ -7,15 +7,17 @@ import { View } from "react-native";
 
 interface ItemRowProps {
   item: Item;
+  // 足した行を見つけやすいよう、少しの間だけ色を付ける
+  highlighted?: boolean;
   onToggle: (id: Id, checked: boolean) => void;
   onMemo: (item: Item) => void;
   onEdit: (id: Id) => void;
 }
 
 // 品目の1行。チェックの反応を速くするため、ほかの行が変わっても描き直さない
-export const ItemRow = memo(function ItemRow({ item, onToggle, onMemo, onEdit }: ItemRowProps) {
+export const ItemRow = memo(function ItemRow({ item, highlighted = false, onToggle, onMemo, onEdit }: ItemRowProps) {
   return (
-    <View className="flex-row items-center gap-1 border-b border-border bg-surface pr-1 pl-4">
+    <View className={cx("flex-row items-center gap-1 border-b border-border pr-1 pl-4", highlighted ? "bg-surface-muted" : "bg-surface")}>
       <Checkbox
         className="min-w-0 flex-1"
         strike

@@ -1,6 +1,6 @@
 import Check from "lucide-react-native/icons/check";
 import ChevronDown from "lucide-react-native/icons/chevron-down";
-import { createContext, type ReactNode, use, useState } from "react";
+import { type ComponentRef, createContext, type ReactNode, type Ref, use, useState } from "react";
 import { FlatList, Modal, Pressable, TextInput, type TextInputProps, View } from "react-native";
 
 import { cx } from "./cx.ts";
@@ -47,6 +47,7 @@ export function Field({ label, hint, error, className, children }: FieldProps) {
 const controlClass = "w-full rounded-md border border-border-strong bg-surface px-3 text-base text-fg focus:border-primary-fg";
 
 export interface InputProps extends TextInputProps {
+  ref?: Ref<ComponentRef<typeof TextInput>>;
   className?: string;
   // 誤りの見た目にする(Field の中なら Field の error から決まる)
   invalid?: boolean;

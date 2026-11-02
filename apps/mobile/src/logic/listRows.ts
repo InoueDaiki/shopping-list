@@ -1,5 +1,5 @@
 // リスト画面の行。カテゴリの見出しと品目を、1本の FlatList に並べる形にする
-import type { Id, Item, ItemSection, SectionedItems } from "@shopping-list/core";
+import { normalizeItemName, type Id, type Item, type ItemSection, type SectionedItems } from "@shopping-list/core";
 
 export type ListRow =
   | { kind: "section"; key: string; categoryId: Id | null; count: number }
@@ -20,4 +20,14 @@ export function listRows({ unchecked, checked }: SectionedItems): ListRow[] {
     rows.push({ kind: "checkedHeader", key: "checked", count }, ...sectionRows(checked, "done"));
   }
   return rows;
+}
+
+export function itemRowIndex(rows: readonly ListRow[], id: Id): number {
+  return rows.findIndex((row) => row.kind === "item" && row.item.id === id);
+}
+
+// 重ねて足せなかったときの、すでにある品目。リポジトリの判定と同じく、チェック済みは見ない
+export function openItemNamed(items: readonly Item[], listId: Id, name: string): Item | undefined {
+  const key = normalizeItemName(name);
+  return items.find((item) => item.listId === listId && !item.checked && normalizeItemName(item.name) === key);
 }

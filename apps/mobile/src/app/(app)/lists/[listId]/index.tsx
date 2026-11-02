@@ -1,22 +1,28 @@
 import type { Id, Item } from "@shopping-list/core";
 import { Badge, Button, cx, FullScreenMessage, Icon, Text } from "@shopping-list/ui-native";
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import ArrowDownNarrowWide from "lucide-react-native/icons/arrow-down-narrow-wide";
 import ArrowUpNarrowWide from "lucide-react-native/icons/arrow-up-narrow-wide";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
 import MapPin from "lucide-react-native/icons/map-pin";
-import Plus from "lucide-react-native/icons/plus";
 import { useCallback, useMemo, useState } from "react";
-import { FlatList, Pressable, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Pressable, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AddItemBar } from "../../../../components/AddItemBar.tsx";
 import { ItemRow } from "../../../../components/ItemRow.tsx";
 import { MemoSheet } from "../../../../components/MemoSheet.tsx";
 import { StoreSheet } from "../../../../components/StoreSheet.tsx";
 import { SyncNoticeBar } from "../../../../components/SyncNoticeBar.tsx";
+import { useRowHighlight } from "../../../../components/useRowHighlight.ts";
 import { useSections, useShopping, useTable } from "../../../../data/hooks.ts";
 import { repository, syncRunner } from "../../../../data/runtime.ts";
 import { categoryToneMap } from "../../../../logic/categoryTone.ts";
 import { listRows, type ListRow } from "../../../../logic/listRows.ts";
+
+// 帯の下の余白(pb-safe-or-3 の 3)
+const BAR_BOTTOM_PADDING = 12;
 
 // 品目の一覧。今の店舗の順に、カテゴリごとに並べる
 export default function ListScreen() {
@@ -33,6 +39,9 @@ export default function ListScreen() {
   const names = useMemo(() => new Map(categories.map((row) => [row.id, row.name])), [categories]);
   const [memoItem, setMemoItem] = useState<Item | null>(null);
   const [storeOpen, setStoreOpen] = useState(false);
+  const { listRef, highlightId, showRow, onScrollToIndexFailed } = useRowHighlight(rows);
+  const headerHeight = useHeaderHeight();
+  const insets = useSafeAreaInsets();
 
   // 開いている間はもう1人の変更も読む
   useFocusEffect(
@@ -54,7 +63,7 @@ export default function ListScreen() {
   const renderItem = useCallback(
     ({ item: row }: { item: ListRow }) => {
       if (row.kind === "item") {
-        return <ItemRow item={row.item} onToggle={onToggle} onMemo={setMemoItem} onEdit={onEdit} />;
+        return <ItemRow item={row.item} highlighted={row.item.id === highlightId} onToggle={onToggle} onMemo={setMemoItem} onEdit={onEdit} />;
       }
       if (row.kind === "checkedHeader") {
         return <Text className="px-4 pt-6 pb-1 text-sm font-medium text-fg-muted">{`チェック済み ${row.count}`}</Text>;
@@ -67,7 +76,7 @@ export default function ListScreen() {
         </View>
       );
     },
-    [names, tones, onToggle, onEdit],
+    [names, tones, highlightId, onToggle, onEdit],
   );
 
   const list = lists.find((row) => row.id === listId);
@@ -78,7 +87,13 @@ export default function ListScreen() {
   const descending = direction === "desc";
 
   return (
-    <View className="flex-1 bg-canvas">
+    // edge-to-edge では画面が縮まないので padding で持ち上げる。ヘッダーの分を足し、
+    // 帯の下の余白のうち、ナビゲーションバーのために増えた分はキーボードの裏に沈める
+    <KeyboardAvoidingView
+      behavior="padding"
+      keyboardVerticalOffset={headerHeight - Math.max(insets.bottom - BAR_BOTTOM_PADDING, 0)}
+      className="flex-1 bg-canvas"
+    >
       <Stack.Screen
         options={{
           title: list.name,
@@ -95,14 +110,17 @@ export default function ListScreen() {
         }}
       />
       <FlatList
+        ref={listRef}
         className="flex-1"
         data={rows}
         keyExtractor={(row) => row.key}
         renderItem={renderItem}
         initialNumToRender={24}
+        keyboardShouldPersistTaps="handled"
+        onScrollToIndexFailed={onScrollToIndexFailed}
         contentContainerClassName="pb-4"
         ListHeaderComponent={<SyncNoticeBar className="mx-4 mt-2" />}
-        ListEmptyComponent={<Text className="py-12 text-center text-fg-muted">品目がありません。下のボタンから追加してください。</Text>}
+        ListEmptyComponent={<Text className="py-12 text-center text-fg-muted">品目がありません。下の入力欄から追加してください。</Text>}
       />
       <View className="gap-2 border-t border-border bg-surface px-4 pt-2 pb-safe-or-3">
         <View className="flex-row items-center gap-2">
@@ -118,11 +136,8 @@ export default function ListScreen() {
             </Text>
             <Icon icon={ChevronRight} size={18} color="fg-muted" />
           </Pressable>
-          <Button variant="primary" size="lg" onPress={() => router.push(`/lists/${listId}/add`)}>
-            <Icon icon={Plus} size={20} />
-            追加
-          </Button>
         </View>
+        <AddItemBar listId={listId} onShowItem={showRow} />
       </View>
 
       <MemoSheet
@@ -134,6 +149,6 @@ export default function ListScreen() {
         }}
       />
       <StoreSheet open={storeOpen} onClose={() => setStoreOpen(false)} />
-    </View>
+    </KeyboardAvoidingView>
   );
 }

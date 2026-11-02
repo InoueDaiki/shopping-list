@@ -6,7 +6,7 @@ import type { SyncStatus } from "../data/syncRunner.ts";
 import { accountCheck, ownerValue } from "./account.ts";
 import { categoryToneMap } from "./categoryTone.ts";
 import { inviteLink, inviteMessage, parseInviteLink } from "./invite.ts";
-import { listRows } from "./listRows.ts";
+import { itemRowIndex, listRows, openItemNamed } from "./listRows.ts";
 import { splitMemo } from "./memo.ts";
 import { refinedPosition } from "./storePosition.ts";
 import { moveInOrder } from "./moveInOrder.ts";
@@ -64,6 +64,31 @@ describe("listRows", () => {
 
   it("チェック済みが無ければ見出しを出さない", () => {
     expect(listRows({ unchecked: [], checked: [] })).toEqual([]);
+  });
+});
+
+describe("itemRowIndex", () => {
+  const rows = listRows({ unchecked: [{ categoryId: null, items: [item("1"), item("2")] }], checked: [] });
+
+  it("見出しを数えた行の位置を返す", () => {
+    expect(itemRowIndex(rows, "2")).toBe(2);
+  });
+
+  it("無ければ -1 を返す", () => {
+    expect(itemRowIndex(rows, "9")).toBe(-1);
+  });
+});
+
+describe("openItemNamed", () => {
+  const row = (id: string, listId: string, name: string, checked: boolean) => ({ id, listId, name, checked }) as Item;
+  const items = [row("1", "a", "りんご", true), row("2", "b", "りんご", false), row("3", "a", "リンゴ", false)];
+
+  it("同じリストの未チェックの品目を、正規化した名前で探す", () => {
+    expect(openItemNamed(items, "a", " りんご ")?.id).toBe("3");
+  });
+
+  it("チェック済みしか無ければ返さない", () => {
+    expect(openItemNamed(items.slice(0, 1), "a", "りんご")).toBeUndefined();
   });
 });
 
