@@ -2,6 +2,8 @@ export * from "./category.ts";
 export * from "./constants.ts";
 export * from "./direction.ts";
 export * from "./frequent.ts";
+export * from "./inference.ts";
+export * from "./inference-dictionary.ts";
 export * from "./normalize.ts";
 export * from "./ordering.ts";
 export * from "./sort.ts";

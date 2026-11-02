@@ -4,6 +4,7 @@ import { type ComponentRef, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { Keyboard, Pressable, ScrollView, type TextInput, View } from "react-native";
 
 import { useListItems, useTable } from "../data/hooks.ts";
+import { inferItemCategory } from "../data/inference.ts";
 import { localStore, repository } from "../data/runtime.ts";
 import { openItemNamed } from "../logic/listRows.ts";
 
@@ -100,6 +101,7 @@ export function AddItemBar({ listId, onShowItem }: AddItemBarProps) {
       history: localStore.rows("history"),
     });
     const item = repository.addItem(listId, itemName, category);
+    if (item?.categoryId === null) inferItemCategory(item);
     const shown = item ?? openItemNamed(localStore.rows("items"), listId, itemName);
     setName("");
     setNotice(item ? null : "すでにリストにあります");

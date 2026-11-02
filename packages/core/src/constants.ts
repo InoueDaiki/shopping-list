@@ -46,3 +46,18 @@ export const SUGGESTION_LIMIT = 8;
 export const NEARBY_STORE_RADIUS_M = 300;
 // 地球の平均半径
 export const EARTH_RADIUS_M = 6_371_008.8;
+
+// カテゴリの推定: 文字 n-gram の長さ
+export const INFERENCE_NGRAM_SIZES = [2, 3] as const;
+// カテゴリの推定: Naive Bayes の加算スムージング
+export const INFERENCE_SMOOTHING = 0.1;
+// カテゴリの推定: 履歴の結果を使う確率の下限
+export const INFERENCE_MIN_CONFIDENCE = 0.9;
+// カテゴリの推定: 学習した品目名がこれ未満のカテゴリは、履歴からは答えない
+export const INFERENCE_MIN_CATEGORY_NAMES = 3;
+// カテゴリの推定: 品目名の n-gram のうち、選んだカテゴリで見たことのある割合の下限
+export const INFERENCE_MIN_GRAM_OVERLAP = 0.3;
+// カテゴリの推定: 辞書の部分一致に使う語の長さの下限。かなは短いと別の語に紛れる
+export const INFERENCE_MIN_PARTIAL_LENGTH = 3;
+// カテゴリの推定: 漢字を含む語は2文字から部分一致に使う
+export const INFERENCE_MIN_PARTIAL_LENGTH_KANJI = 2;
