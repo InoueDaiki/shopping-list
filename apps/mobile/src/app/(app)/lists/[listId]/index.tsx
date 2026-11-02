@@ -43,12 +43,12 @@ export default function ListScreen() {
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
 
-  // 開いている間はもう1人の変更も読む
+  // 開いている間はもう1人の変更も読み、開いていることをシートに書く(相手も開いていれば速く読む)
   useFocusEffect(
     useCallback(() => {
-      syncRunner.setViewingList(true);
-      return () => syncRunner.setViewingList(false);
-    }, []),
+      syncRunner.setViewingList(listId);
+      return () => syncRunner.setViewingList(null);
+    }, [listId]),
   );
 
   const onToggle = useCallback((id: Id, checked: boolean) => {

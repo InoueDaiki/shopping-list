@@ -2,9 +2,7 @@
 
 import type { SyncTable } from "@shopping-list/core";
 
-export const SCHEMA_VERSION = 4;
-// 自動で上げられる前の版。ADDED_COLUMNS の列を足すだけで SCHEMA_VERSION になる
-export const UPGRADABLE_VERSION = 3;
+export const SCHEMA_VERSION = 5;
 
 export const ID_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
 export const ID_LIST_PATTERN = "^([A-Za-z0-9_-]{1,64}(,[A-Za-z0-9_-]{1,64})*)?$";
@@ -40,7 +38,8 @@ export type SheetName =
   | "Items"
   | "History"
   | "StoreOrders"
-  | "Meta";
+  | "Meta"
+  | "Presence";
 
 export interface SheetDef {
   name: SheetName;
@@ -153,7 +152,19 @@ export const SHEETS: readonly SheetDef[] = [
     name: "Meta",
     sheetId: 107,
     rowCount: 10,
-    columns: [{ name: "schema_version", kind: "count" }],
+    columns: [
+      { name: "schema_version", kind: "count" },
+      // 変更の印。書くたびに「書いた時刻/端末ID」を置く。読むのはこのセルと Presence だけで、
+      // 変わったときにだけ全部を読む
+      text("last_write"),
+    ],
+  },
+  {
+    // 在室の記録。同期の表(SyncTable)ではなく、墓石も履歴も持たない。行は端末ごとに1つで上書きする
+    name: "Presence",
+    sheetId: 108,
+    rowCount: 50,
+    columns: [id("device_id"), id("list_id"), iso("until"), iso("updated_at")],
   },
 ];
 
@@ -164,6 +175,9 @@ function sheet(name: SheetName): SheetDef {
 }
 
 export const META_SHEET = sheet("Meta");
+export const PRESENCE_SHEET = sheet("Presence");
+// Meta の版と変更の印(A2 と B2)
+export const META_RANGE = `${META_SHEET.name}!A2:B2`;
 
 export const TABLE_SHEETS: Readonly<Record<SyncTable, SheetDef>> = {
   lists: sheet("Lists"),
@@ -184,10 +198,35 @@ export const ITEM_CHECK_COLUMNS = [
   "checked_updated_at",
 ] as const;
 
-// UPGRADABLE_VERSION から足した列。どれも各シートの末尾にある
-export const ADDED_COLUMNS: Partial<Record<SheetName, readonly string[]>> = {
-  Stores: ["list_id"],
-};
+export interface Upgrade {
+  // この版のシートを、次の版へ上げる
+  from: number;
+  // 足した列。どれも各シートの末尾にある
+  columns: Partial<Record<SheetName, readonly string[]>>;
+  // 足したシート
+  sheets: readonly SheetName[];
+}
+
+// 自動で上げられる前の版と、そこから足したもの。古い順に並べ、最後の次が SCHEMA_VERSION
+export const UPGRADES: readonly Upgrade[] = [
+  { from: 3, columns: { Stores: ["list_id"] }, sheets: [] },
+  { from: 4, columns: { Meta: ["last_write"] }, sheets: ["Presence"] },
+];
+
+// version から今の版までに足したもの。上げられない版なら null
+export function addedSince(version: unknown): Omit<Upgrade, "from"> | null {
+  const start = UPGRADES.findIndex((upgrade) => upgrade.from === version);
+  if (start < 0) return null;
+  const columns: Partial<Record<SheetName, string[]>> = {};
+  const sheets: SheetName[] = [];
+  for (const upgrade of UPGRADES.slice(start)) {
+    for (const [name, added] of Object.entries(upgrade.columns) as [SheetName, readonly string[]][]) {
+      (columns[name] ??= []).push(...added);
+    }
+    sheets.push(...upgrade.sheets);
+  }
+  return { columns, sheets };
+}
 
 // 列の位置。無い列は -1
 export function columnIndex(def: SheetDef, name: string): number {

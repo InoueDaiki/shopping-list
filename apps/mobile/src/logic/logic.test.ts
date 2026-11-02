@@ -8,6 +8,14 @@ import { categoryToneMap } from "./categoryTone.ts";
 import { formatCoordinates, geoUrl, parseCoordinates } from "./coordinates.ts";
 import { inviteLink, inviteMessage, parseInviteLink } from "./invite.ts";
 import { itemRowIndex, listRows, openItemNamed } from "./listRows.ts";
+import {
+  LIST_SYNC_INTERVAL_MS,
+  LIVE_WRITE_SYNC_DELAY_MS,
+  othersPresent,
+  SHOPPING_SYNC_INTERVAL_MS,
+  syncCadence,
+  WRITE_SYNC_DELAY_MS,
+} from "./liveSync.ts";
 import { splitMemo } from "./memo.ts";
 import { refinedPosition } from "./storePosition.ts";
 import { moveInOrder } from "./moveInOrder.ts";
@@ -244,5 +252,47 @@ describe("redirectSystemPath", () => {
 
   it("ほかのパスはそのまま", () => {
     expect(redirectSystemPath({ path: "/lists/oauth2redirect", initial: false })).toBe("/lists/oauth2redirect");
+  });
+});
+
+describe("othersPresent", () => {
+  const now = Date.parse("2026-01-01T00:01:00.000Z");
+  const entry = (deviceId: string, listId: string, until: string) => ({ deviceId, listId, until });
+
+  it("自分以外の端末が同じリストを今開いていれば在室", () => {
+    const presence = [entry("deviceB", "list1", "2026-01-01T00:01:30.000Z")];
+    expect(othersPresent(presence, { deviceId: "deviceA", listId: "list1", now })).toBe(true);
+  });
+
+  it("自分、別のリスト、切れた在室、リストを開いていないときは在室でない", () => {
+    const presence = [
+      entry("deviceA", "list1", "2026-01-01T00:01:30.000Z"),
+      entry("deviceB", "list2", "2026-01-01T00:01:30.000Z"),
+      entry("deviceC", "list1", "2026-01-01T00:01:00.000Z"),
+    ];
+    expect(othersPresent(presence, { deviceId: "deviceA", listId: "list1", now })).toBe(false);
+    expect(othersPresent(presence, { deviceId: "deviceZ", listId: null, now })).toBe(false);
+  });
+});
+
+describe("syncCadence", () => {
+  const base = { foreground: true, shopping: false, viewingListId: "list1", othersPresent: false };
+
+  it("相手がいるときだけ速く読み、自分の変更も早く送る", () => {
+    expect(syncCadence({ ...base, othersPresent: true })).toEqual({
+      intervalMs: LIST_SYNC_INTERVAL_MS,
+      peek: true,
+      writeDelayMs: LIVE_WRITE_SYNC_DELAY_MS,
+    });
+    expect(syncCadence(base)).toEqual({ intervalMs: LIST_SYNC_INTERVAL_MS, peek: false, writeDelayMs: WRITE_SYNC_DELAY_MS });
+  });
+
+  it("背面やリストの外では速く読まない", () => {
+    expect(syncCadence({ ...base, foreground: false, othersPresent: true })).toMatchObject({ intervalMs: null, peek: false });
+    expect(syncCadence({ ...base, viewingListId: null, othersPresent: true })).toMatchObject({ intervalMs: null, peek: false });
+  });
+
+  it("買い物中は30秒ごとのまま", () => {
+    expect(syncCadence({ ...base, shopping: true, viewingListId: null }).intervalMs).toBe(SHOPPING_SYNC_INTERVAL_MS);
   });
 });

@@ -22,6 +22,8 @@ export interface SyncEngineOptions {
   remote: RemoteStore;
   now?: () => number;
   limits?: RateLimits;
+  // 同期の外の読み書き(在室と変更の印)と回数を分け合うときに渡す。limits と now より優先する
+  budget?: RateBudget;
   maxOpsPerPush?: number;
 }
 
@@ -78,10 +80,9 @@ export class SyncEngine {
   constructor(options: SyncEngineOptions) {
     this.#local = options.local;
     this.#remote = options.remote;
-    this.#budget = new RateBudget(
-      options.limits ?? DEFAULT_RATE_LIMITS,
-      options.now ?? Date.now,
-    );
+    this.#budget =
+      options.budget ??
+      new RateBudget(options.limits ?? DEFAULT_RATE_LIMITS, options.now ?? Date.now);
     this.#maxOpsPerPush = options.maxOpsPerPush ?? DEFAULT_MAX_OPS_PER_PUSH;
   }
 

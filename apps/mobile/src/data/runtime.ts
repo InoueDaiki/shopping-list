@@ -1,10 +1,11 @@
 // データ層の組み立て。アプリに1つだけ持つ。読み込みは同期なので、最初の描画から SQLite の中身が見える
-import { SyncEngine, type Id, type SyncResult } from "@shopping-list/core";
+import { DEFAULT_RATE_LIMITS, RateBudget, SyncEngine, type Id, type SyncResult } from "@shopping-list/core";
 import { INITIAL_CATEGORIES, SheetsClient, SheetsRemote, type FetchLike } from "@shopping-list/sheets";
 
 import { auth, getAccessToken, signOut } from "../auth.ts";
 import { config } from "../config.ts";
 import { accountCheck, ownerValue } from "../logic/account.ts";
+import { PEEK_READ_RESERVE } from "../logic/liveSync.ts";
 import { seedDemo } from "./demo.ts";
 import { openDatabase } from "./expoDb.ts";
 import { newId } from "./ids.ts";
@@ -22,6 +23,8 @@ export const INVITE_KEY = "pendingInvite";
 const SHEET_DRAFT_KEY = "sheetDraft";
 // 写しの持ち主のメール。SQLite だけに置き、シートへ送らず、ログにも出さない
 export const OWNER_KEY = "accountOwner";
+// 端末ごとの乱数の ID。シートの在室と変更の印に書く。名前やメールとは結び付けない
+const DEVICE_KEY = "deviceId";
 
 const nowIso = () => new Date().toISOString();
 
@@ -63,7 +66,19 @@ export function currentSheet(): SheetRef | null {
   return stored === null ? null : (JSON.parse(stored) as SheetRef);
 }
 
-let held: { spreadsheetId: string; engine: SyncEngine } | null = null;
+// 端末の ID。無ければ作って覚える
+function deviceId(): string {
+  const stored = localStore.setting(DEVICE_KEY);
+  if (stored !== null) return stored;
+  const created = newId();
+  localStore.setSetting(DEVICE_KEY, created);
+  return created;
+}
+
+// 同期と、在室と印の読み書きで、毎分の回数を分け合う
+const budget = new RateBudget(DEFAULT_RATE_LIMITS, Date.now);
+
+let held: { spreadsheetId: string; engine: SyncEngine; remote: SheetsRemote } | null = null;
 
 const IDLE_RESULT: SyncResult = { status: "ok", pushed: 0, superseded: 0, pulled: false, pending: 0, issues: [], error: null };
 
@@ -90,14 +105,43 @@ async function runSync(): Promise<SyncResult> {
   await auth.load();
   if (accountUnconfirmed()) return IDLE_RESULT;
   if (held?.spreadsheetId !== sheet.spreadsheetId) {
-    const remote = new SheetsRemote({ client: sheetsClient, spreadsheetId: sheet.spreadsheetId });
-    held = { spreadsheetId: sheet.spreadsheetId, engine: new SyncEngine({ local: localStore, remote }) };
+    const remote = new SheetsRemote({
+      client: sheetsClient,
+      spreadsheetId: sheet.spreadsheetId,
+      deviceId: deviceId(),
+      onPresence: (presence) => syncRunner.notePresence(presence),
+    });
+    held = { spreadsheetId: sheet.spreadsheetId, remote, engine: new SyncEngine({ local: localStore, remote, budget }) };
   }
   return held.engine.sync();
 }
 
+// 今のシートの SheetsRemote。同期がまだ作っていない、シートを替えた、確認が済んでいないときは null
+function liveRemote(): SheetsRemote | null {
+  const sheet = currentSheet();
+  if (config.demo || !sheet || held?.spreadsheetId !== sheet.spreadsheetId || accountUnconfirmed()) return null;
+  return held.remote;
+}
+
 export const syncRunner = new SyncRunner({
   sync: runSync,
+  // デモモードはシートが無いので、在室も印も読み書きしない
+  live: config.demo
+    ? undefined
+    : {
+        deviceId,
+        peek: async () => {
+          const remote = liveRemote();
+          // 同期の分を残す。足りなければ、この回は読まない
+          if (remote === null || !budget.tryTake(1, 0, PEEK_READ_RESERVE)) return null;
+          return remote.peek();
+        },
+        announce: async (listId, until) => {
+          const remote = liveRemote();
+          if (remote === null || !budget.tryTake(remote.presenceKnown() ? 0 : 1, 1)) return;
+          await remote.writePresence({ listId, until: new Date(until).toISOString() });
+        },
+      },
   pendingCount: () => localStore.pendingCountNow(),
   afterSync: (result) => {
     repository.finishTrips();
@@ -137,9 +181,14 @@ export const sheetDraftStore = {
   save: (value: string | null) => localStore.setSetting(SHEET_DRAFT_KEY, value),
 };
 
-function ownerSetting(): Record<string, string> {
-  const owner = localStore.setting(OWNER_KEY);
-  return owner === null ? {} : { [OWNER_KEY]: owner };
+// シートを替えても残す設定。端末の ID は替えると在室の行が増えるので残す
+function keptSettings(): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const key of [OWNER_KEY, DEVICE_KEY]) {
+    const value = localStore.setting(key);
+    if (value !== null) kept[key] = value;
+  }
+  return kept;
 }
 
 // シートを決める、または替える。task(シートを開く、作る)が返したシートへ、端末の写しを捨ててから
@@ -148,7 +197,7 @@ export function switchSheet(task: () => Promise<SheetRef | null>): Promise<boole
   return localStore.whileWritesLocked(async () => {
     const sheet = await task();
     if (sheet === null) return false;
-    await syncRunner.pause(() => localStore.wipe({ ...ownerSetting(), [SHEET_KEY]: JSON.stringify(sheet) }));
+    await syncRunner.pause(() => localStore.wipe({ ...keptSettings(), [SHEET_KEY]: JSON.stringify(sheet) }));
     await syncRunner.syncNow();
     return true;
   });

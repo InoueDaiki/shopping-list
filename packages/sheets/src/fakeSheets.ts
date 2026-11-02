@@ -39,10 +39,11 @@ function respond(status: number, body: unknown): FetchResponse {
 function parseRange(range: string) {
   const match = /^(\w+)!A(\d+)(?::([A-Z]+)(\d+)?)?$/.exec(range);
   if (match === null) throw new Error(`解釈できない範囲: ${range}`);
-  const [, title, from, lastColumn] = match;
+  const [, title, from, lastColumn, lastRow] = match;
   return {
     title: title as string,
     from: Number(from),
+    to: lastRow === undefined ? undefined : Number(lastRow),
     columns: lastColumn === undefined ? 1 : lastColumn.charCodeAt(0) - 64,
     single: lastColumn === undefined,
   };
@@ -92,6 +93,15 @@ export class FakeSheets {
       if (requests.some((request) => this.rejects?.(request))) {
         return respond(400, { error: { message: "入力規則の違反" } });
       }
+      // 本物と同じく、同じ名前や番号のシートを足す要求は全体を拒否する
+      const duplicated = requests.some((request) => {
+        const properties = (request as { addSheet?: { properties: FakeSheet } }).addSheet?.properties;
+        return (
+          properties !== undefined &&
+          this.sheets.some((s) => s.title === properties.title || s.sheetId === properties.sheetId)
+        );
+      });
+      if (duplicated) return respond(400, { error: { message: "同じシートがある" } });
       for (const request of requests) this.#apply(request);
       this.requests.push(...requests);
       return respond(200, { replies: [] });
@@ -116,9 +126,9 @@ export class FakeSheets {
     });
     if (outside) return respond(400, { error: { message: "範囲がシートの外" } });
     const valueRanges = ranges.map((range) => {
-      const { title, from, columns } = parseRange(range);
+      const { title, from, to, columns } = parseRange(range);
       const rows = this.sheet(title)
-        .grid.slice(from - 1)
+        .grid.slice(from - 1, to)
         .map((row) => row.slice(0, columns));
       // 本物と同じく、末尾の空のセルと空の行を返さない
       const values = rows.map((row) => {

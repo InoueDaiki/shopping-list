@@ -24,15 +24,16 @@ export class RateBudget {
     this.#now = now;
   }
 
-  // 使えるなら数えて true を返す。足りなければ何も数えない
-  tryTake(reads: number, writes: number): boolean {
+  // 使えるなら数えて true を返す。足りなければ何も数えない。
+  // reserve は残しておく回数。急がない読み取りが、同期の分を使い切らないようにする
+  tryTake(reads: number, writes: number, reserve = 0): boolean {
     const now = this.#now();
     const since = now - this.#limits.windowMs;
     this.#reads = this.#reads.filter((t) => t > since);
     this.#writes = this.#writes.filter((t) => t > since);
     if (
-      this.#reads.length + reads > this.#limits.readsPerWindow ||
-      this.#writes.length + writes > this.#limits.writesPerWindow
+      this.#reads.length + reads > this.#limits.readsPerWindow - (reads > 0 ? reserve : 0) ||
+      this.#writes.length + writes > this.#limits.writesPerWindow - (writes > 0 ? reserve : 0)
     ) {
       return false;
     }

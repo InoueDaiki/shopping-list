@@ -1,5 +1,5 @@
 import { RemoteError } from "@shopping-list/core";
-import { SCHEMA_VERSION, SHEETS, UPGRADABLE_VERSION, type SheetsClient } from "@shopping-list/sheets";
+import { SCHEMA_VERSION, SHEETS, type SheetsClient } from "@shopping-list/sheets";
 import { describe, expect, it, vi } from "vitest";
 
 import { createSheet, initSheet, openExistingSheet, ReadOnlySheetError, sheetErrorMessage } from "./spreadsheet.ts";
@@ -74,14 +74,14 @@ describe("openExistingSheet", () => {
   it("前の版のシートは、版だけを書かずに上げて開く", async () => {
     const write = vi.fn(async () => ({}));
     const batchUpdate = vi.fn(async () => ({}));
-    const opened = await openExistingSheet(client({ version: UPGRADABLE_VERSION, write, batchUpdate }), URL);
+    const opened = await openExistingSheet(client({ version: SCHEMA_VERSION - 1, write, batchUpdate }), URL);
     expect(opened).toMatchObject({ kind: "ready" });
     expect(batchUpdate).toHaveBeenCalledTimes(1);
     expect(write).not.toHaveBeenCalled();
   });
 
   it("前の版のシートを上げられない権限なら、閲覧だけとして止める", async () => {
-    await expect(openExistingSheet(client({ version: UPGRADABLE_VERSION, batchUpdate: forbidden }), URL)).rejects.toBeInstanceOf(ReadOnlySheetError);
+    await expect(openExistingSheet(client({ version: SCHEMA_VERSION - 1, batchUpdate: forbidden }), URL)).rejects.toBeInstanceOf(ReadOnlySheetError);
   });
 
   it("新しい版のシートは schema で止める", async () => {

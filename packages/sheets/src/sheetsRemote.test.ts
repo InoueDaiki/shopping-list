@@ -11,6 +11,7 @@ import { SheetsClient, type FetchResponse } from "./client.ts";
 import { encodeRow } from "./codec.ts";
 import { SCHEMA_VERSION } from "./schema.ts";
 import { FakeSheets } from "./fakeSheets.ts";
+import type { PresenceRow } from "./presence.ts";
 import {
   beginSpreadsheet,
   createSpreadsheet,
@@ -64,9 +65,9 @@ describe("SheetsRemote", () => {
   let client: SheetsClient;
   let spreadsheetId: string;
 
-  const device = () => {
+  const device = (deviceId = "deviceA", onPresence?: (rows: PresenceRow[]) => void) => {
     const local = new MemoryLocalStore();
-    const remote = new SheetsRemote({ client, spreadsheetId });
+    const remote = new SheetsRemote({ client, spreadsheetId, deviceId, now: () => Date.parse(T(30)), onPresence });
     return { local, remote, engine: new SyncEngine({ local, remote }) };
   };
   const ids = (title: string) => server.sheet(title).grid.slice(1).map((row) => row[0]);
@@ -217,12 +218,18 @@ describe("SheetsRemote", () => {
 
   describe("前の版のシートを上げる", () => {
     const STORE_V3 = ["store1", "架空の店", 1.5, 2.5, T(0), T(0), null];
-    // 前の版のアプリが作った形に戻す
-    const downgrade = () => {
+    // 前の版のアプリが作った形に戻す。版 4 は Presence と Meta の印の列が無く、版 3 は Stores の list_id も無い
+    const downgrade = (version: 3 | 4) => {
+      server.sheets.splice(server.sheets.indexOf(server.sheet("Presence")), 1);
+      const meta = server.sheet("Meta");
+      meta.columnCount = 1;
+      meta.grid = [["schema_version"], [version]];
       const stores = server.sheet("Stores");
-      stores.columnCount = 7;
-      stores.grid = [stores.grid[0]?.slice(0, 7) ?? [], [...STORE_V3]];
-      server.sheet("Meta").grid[1] = [3];
+      stores.grid = [stores.grid[0] ?? [], [...STORE_V3, ...(version === 4 ? ["list1"] : [])]];
+      if (version === 3) {
+        stores.columnCount = 7;
+        stores.grid[0] = stores.grid[0]?.slice(0, 7) ?? [];
+      }
       server.requests.length = 0;
       server.calls.length = 0;
     };
@@ -231,103 +238,151 @@ describe("SheetsRemote", () => {
       expect(stores.columnCount).toBe(8);
       expect(stores.grid[0]?.slice(5)).toEqual(["updated_at", "deleted_at", "list_id"]);
       expect(stores.grid[1]?.slice(0, 7)).toEqual(STORE_V3);
-      expect(server.sheet("Meta").grid[1]).toEqual([SCHEMA_VERSION]);
+      const meta = server.sheet("Meta");
+      expect(meta.columnCount).toBe(2);
+      expect(meta.grid[0]).toEqual(["schema_version", "last_write"]);
+      expect(meta.grid[1]?.[0]).toBe(SCHEMA_VERSION);
+      expect(server.sheet("Presence").grid[0]).toEqual(["device_id", "list_id", "until", "updated_at"]);
+      expect(server.sheets.filter((sheet) => sheet.title === "Presence")).toHaveLength(1);
     };
 
-    beforeEach(downgrade);
+    describe.each([3, 4] as const)("版 %i から", (version) => {
+      beforeEach(() => downgrade(version));
 
-    it("同期の前に上げ、列をずらさず、行を読める", async () => {
-      const { engine, local } = device();
-      const result = await engine.sync();
-      expect(result.status).toBe("ok");
-      expectUpgraded();
-      expect(local.rows.stores.get("store1")).toMatchObject({ name: "架空の店", lat: 1.5, listId: null });
-    });
-
-    it("足した列にだけプルダウンと文字の書式を掛ける", async () => {
-      await device().engine.sync();
-      const validations = server.requests.flatMap((r) => (r.setDataValidation ? [r.setDataValidation] : []));
-      expect(validations).toHaveLength(1);
-      expect(validations[0]).toMatchObject({
-        range: { sheetId: server.sheet("Stores").sheetId, startColumnIndex: 7, endColumnIndex: 8 },
-        rule: { condition: { type: "ONE_OF_RANGE", values: [{ userEnteredValue: "=Lists!$A$2:$A" }] } },
+      it("同期の前に上げ、列をずらさず、行を読める", async () => {
+        const { engine, local } = device();
+        const result = await engine.sync();
+        expect(result.status).toBe("ok");
+        expectUpgraded();
+        expect(local.rows.stores.get("store1")).toMatchObject({
+          name: "架空の店",
+          lat: 1.5,
+          listId: version === 4 ? "list1" : null,
+        });
       });
-      expect(server.requests.filter((r) => r.repeatCell)).toHaveLength(1);
+
+      it("1回の batchUpdate で上げ、2回目は何も書かない", async () => {
+        await device().engine.sync();
+        expect(server.count(":batchUpdate")).toBe(1);
+        server.calls.length = 0;
+        await device().engine.sync();
+        expect(server.count(":batchUpdate")).toBe(0);
+        expectUpgraded();
+      });
+
+      it("2台が同時に上げても壊れない。先に上げた端末の書いた行も残る", async () => {
+        const first = await surveySpreadsheet(client, spreadsheetId);
+        const second = await surveySpreadsheet(client, spreadsheetId);
+        expect([first.outdated, second.outdated]).toEqual([true, true]);
+
+        await upgradeSpreadsheet(client, spreadsheetId, first);
+        const stores = server.sheet("Stores");
+        stores.grid.push(["store2", "別の店", null, null, T(1), T(1), null, "list1"]);
+        server.sheet("Presence").grid.push(["deviceA", "list1", T(9), T(1)]);
+        // 後の1台は Presence を足せずに拒否され、調べ直して先の1台の形を使う
+        const upgraded = await upgradeSpreadsheet(client, spreadsheetId, second);
+
+        expectUpgraded();
+        expect(upgraded).toMatchObject({ outdated: false, missing: [] });
+        expect(upgraded.sheetIds.Presence).toBe(server.sheet("Presence").sheetId);
+        expect(stores.grid[2]?.[7]).toBe("list1");
+        expect(stores.grid).toHaveLength(3);
+        expect(server.sheet("Presence").grid).toHaveLength(2);
+        await expect(surveySpreadsheet(client, spreadsheetId)).resolves.toMatchObject({ outdated: false });
+      });
+
+      it("書き込みが拒否されたら版は上がらず、次に上げ直せる", async () => {
+        server.rejects = (request) => "updateSheetProperties" in request;
+        const { engine } = device();
+        expect((await engine.sync()).status).toBe("failed");
+        expect(server.sheet("Meta").grid[1]).toEqual([version]);
+        expect(server.sheets.some((sheet) => sheet.title === "Presence")).toBe(false);
+
+        server.rejects = null;
+        await engine.sync();
+        expectUpgraded();
+      });
+
+      it("足りないシートを足すときも一緒に上げる", async () => {
+        server.sheets.splice(server.sheets.indexOf(server.sheet("History")), 1);
+        await ensureSpreadsheet(client, spreadsheetId);
+        expectUpgraded();
+        expect(server.sheet("History").grid[0]?.[0]).toBe("id");
+      });
+
+      it("Presence に規則と保護を掛け、番号が重なっても足せる", async () => {
+        server.sheets.push({ sheetId: 108, title: "家計簿", grid: [] });
+        await device().engine.sync();
+        const presence = server.sheet("Presence");
+        expect(presence.sheetId).not.toBe(108);
+        expect(server.requests.some((r) => r.addProtectedRange?.protectedRange.range.sheetId === presence.sheetId)).toBe(true);
+        expect(
+          server.requests.some(
+            (r) => r.setDataValidation?.range.sheetId === presence.sheetId && r.setDataValidation.range.startColumnIndex === 2,
+          ),
+        ).toBe(true);
+      });
     });
 
-    it("1回の batchUpdate で上げ、2回目は何も書かない", async () => {
-      await device().engine.sync();
-      const writes = server.count(":batchUpdate");
-      expect(writes).toBe(1);
-      server.calls.length = 0;
-      await device().engine.sync();
+    describe("版 3 から", () => {
+      beforeEach(() => downgrade(3));
+
+      it("足した列にだけプルダウンと文字の書式を掛ける", async () => {
+        await device().engine.sync();
+        const stores = server.sheet("Stores").sheetId;
+        const meta = server.sheet("Meta").sheetId;
+        const validations = server.requests.flatMap((r) =>
+          r.setDataValidation && r.setDataValidation.range.sheetId !== server.sheet("Presence").sheetId ? [r.setDataValidation] : [],
+        );
+        expect(validations).toHaveLength(1);
+        expect(validations[0]).toMatchObject({
+          range: { sheetId: stores, startColumnIndex: 7, endColumnIndex: 8 },
+          rule: { condition: { type: "ONE_OF_RANGE", values: [{ userEnteredValue: "=Lists!$A$2:$A" }] } },
+        });
+        const formats = server.requests.flatMap((r) => (r.repeatCell ? [r.repeatCell.range] : []));
+        expect(formats.filter((range) => range.sheetId === stores || range.sheetId === meta)).toEqual([
+          expect.objectContaining({ sheetId: stores, startColumnIndex: 7 }),
+          expect.objectContaining({ sheetId: meta, startColumnIndex: 1 }),
+        ]);
+      });
+
+      it("手で列を足したシートの列の数を減らさない", async () => {
+        server.sheet("Stores").columnCount = 12;
+        await device().engine.sync();
+        expect(server.sheet("Stores").columnCount).toBe(12);
+      });
+
+      it("足す列の場所が使われていれば、触らずに止める", async () => {
+        const stores = server.sheet("Stores");
+        stores.columnCount = 8;
+        stores.grid[0]?.push("メモ");
+        const result = await device().engine.sync();
+        expect(result.error?.kind).toBe("schema");
+        expect(server.count(":batchUpdate")).toBe(0);
+      });
+
+      it("上げた後は list_id を読み書きできる", async () => {
+        const { engine, local } = device();
+        await engine.sync();
+        const row = local.rows.stores.get("store1");
+        await local.commit([
+          { action: "put", table: "stores", row: { ...(row as NonNullable<typeof row>), listId: "list1", updatedAt: T(5) } },
+        ]);
+        await engine.sync();
+        expect(server.sheet("Stores").grid[1]?.[7]).toBe("list1");
+        const other = device();
+        await other.engine.sync();
+        expect(other.local.rows.stores.get("store1")?.listId).toBe("list1");
+      });
+    });
+
+    it("版 4 の Meta の B 列が使われていれば、触らずに止める", async () => {
+      downgrade(4);
+      const meta = server.sheet("Meta");
+      meta.columnCount = 2;
+      meta.grid[0]?.push("メモ");
+      expect((await device().engine.sync()).error?.kind).toBe("schema");
       expect(server.count(":batchUpdate")).toBe(0);
-      expectUpgraded();
-    });
-
-    it("2台が同時に上げても壊れない。先に上げた端末の書いた行も残る", async () => {
-      const first = await surveySpreadsheet(client, spreadsheetId);
-      const second = await surveySpreadsheet(client, spreadsheetId);
-      expect([first.outdated, second.outdated]).toEqual([true, true]);
-
-      await upgradeSpreadsheet(client, spreadsheetId, first);
-      const stores = server.sheet("Stores");
-      stores.grid.push(["store2", "別の店", null, null, T(1), T(1), null, "list1"]);
-      await upgradeSpreadsheet(client, spreadsheetId, second);
-
-      expectUpgraded();
-      expect(stores.grid[2]?.[7]).toBe("list1");
-      expect(stores.grid).toHaveLength(3);
-      await expect(surveySpreadsheet(client, spreadsheetId)).resolves.toMatchObject({ outdated: false });
-    });
-
-    it("手で列を足したシートの列の数を減らさない", async () => {
-      server.sheet("Stores").columnCount = 12;
-      await device().engine.sync();
-      expect(server.sheet("Stores").columnCount).toBe(12);
-    });
-
-    it("足す列の場所が使われていれば、触らずに止める", async () => {
-      const stores = server.sheet("Stores");
-      stores.columnCount = 8;
-      stores.grid[0]?.push("メモ");
-      const result = await device().engine.sync();
-      expect(result.error?.kind).toBe("schema");
-      expect(server.count(":batchUpdate")).toBe(0);
-    });
-
-    it("書き込みが拒否されたら版は上がらず、次に上げ直せる", async () => {
-      server.rejects = (request) => "updateSheetProperties" in request;
-      const { engine } = device();
-      expect((await engine.sync()).status).toBe("failed");
-      expect(server.sheet("Meta").grid[1]).toEqual([3]);
-      expect(server.sheet("Stores").columnCount).toBe(7);
-
-      server.rejects = null;
-      await engine.sync();
-      expectUpgraded();
-    });
-
-    it("上げた後は list_id を読み書きできる", async () => {
-      const { engine, local } = device();
-      await engine.sync();
-      const row = local.rows.stores.get("store1");
-      await local.commit([
-        { action: "put", table: "stores", row: { ...(row as NonNullable<typeof row>), listId: "list1", updatedAt: T(5) } },
-      ]);
-      await engine.sync();
-      expect(server.sheet("Stores").grid[1]?.[7]).toBe("list1");
-      const other = device();
-      await other.engine.sync();
-      expect(other.local.rows.stores.get("store1")?.listId).toBe("list1");
-    });
-
-    it("足りないシートを足すときも一緒に上げる", async () => {
-      const index = server.sheets.findIndex((sheet) => sheet.title === "History");
-      server.sheets.splice(index, 1);
-      await ensureSpreadsheet(client, spreadsheetId);
-      expectUpgraded();
-      expect(server.sheet("History").grid[0]?.[0]).toBe("id");
     });
   });
 
@@ -605,6 +660,89 @@ describe("SheetsRemote", () => {
       server.sheet("History").grid.push(row, [...row]);
       await a.engine.sync();
       expect(a.local.rows.history.size).toBe(1);
+    });
+  });
+
+  describe("変更の印と在室", () => {
+    const marker = () => server.sheet("Meta").grid[1]?.[1];
+
+    it("書くたびに同じ batchUpdate で印を書き、要求の回数を増やさない", async () => {
+      const a = device();
+      await a.engine.sync();
+      server.calls.length = 0;
+      await a.local.commit([putItem(item("i1", T(1)))]);
+      await a.engine.sync();
+      expect(server.count(":batchUpdate")).toBe(1);
+      expect(marker()).toBe(`${T(30)}/deviceA`);
+    });
+
+    it("印と在室を1回の読み取りで読み、ほかの端末が書いたときだけ changed になる", async () => {
+      const a = device("deviceA");
+      const b = device("deviceB");
+      await a.engine.sync();
+      await b.engine.sync();
+      server.calls.length = 0;
+      expect((await a.remote.peek()).changed).toBe(false);
+      expect(server.count("values:batchGet")).toBe(1);
+
+      // 自分の書き込みの直後は、全部を読み直さない
+      await a.local.commit([putItem(item("i1", T(1)))]);
+      await a.engine.sync();
+      expect((await a.remote.peek()).changed).toBe(false);
+      expect((await b.remote.peek()).changed).toBe(true);
+      // 全部を読むまで changed のまま
+      expect((await b.remote.peek()).changed).toBe(true);
+      await b.engine.sync();
+      expect((await b.remote.peek()).changed).toBe(false);
+    });
+
+    it("自分の書き込みの後にほかの端末が書けば、changed になる", async () => {
+      const a = device("deviceA");
+      const b = device("deviceB");
+      await a.engine.sync();
+      await b.engine.sync();
+      await a.local.commit([putItem(item("i1", T(1)))]);
+      await a.engine.sync();
+      await b.local.commit([putItem(item("i2", T(2)))]);
+      await b.engine.sync();
+      expect((await a.remote.peek()).changed).toBe(true);
+    });
+
+    it("まだ全部を読んでいなければ changed にする", async () => {
+      expect((await device().remote.peek()).changed).toBe(true);
+    });
+
+    it("在室の行は端末ごとに1つで上書きし、全部の読み取りでも一緒に読む", async () => {
+      const seen: PresenceRow[][] = [];
+      const a = device("deviceA", (rows) => seen.push(rows));
+      const b = device("deviceB");
+      await a.remote.writePresence({ listId: "list1", until: T(31) });
+      await a.remote.writePresence({ listId: "list1", until: T(32) });
+      await b.remote.writePresence({ listId: "list1", until: T(33) });
+      await a.remote.writePresence({ listId: "list1", until: T(34) });
+      expect(server.sheet("Presence").grid.slice(1)).toEqual([
+        ["deviceA", "list1", T(34), T(30)],
+        ["deviceB", "list1", T(33), T(30)],
+      ]);
+      // 行が分かっていれば読まずに書く
+      server.calls.length = 0;
+      await a.remote.writePresence({ listId: "list1", until: T(35) });
+      expect(server.count("values:batchGet")).toBe(0);
+      expect(server.count(":batchUpdate")).toBe(1);
+
+      server.calls.length = 0;
+      await a.engine.sync();
+      expect(server.count("values:batchGet")).toBe(1);
+      expect(seen.at(-1)?.map((row) => row.deviceId)).toEqual(["deviceA", "deviceB"]);
+      expect((await a.remote.peek()).presence.map((row) => row.until)).toEqual([T(35), T(33)]);
+    });
+
+    it("在室を書いても印は変わらない", async () => {
+      const a = device();
+      await a.engine.sync();
+      const before = marker();
+      await a.remote.writePresence({ listId: "list1", until: T(31) });
+      expect(marker()).toBe(before);
     });
   });
 
