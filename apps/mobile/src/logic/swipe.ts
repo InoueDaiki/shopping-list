@@ -2,8 +2,8 @@
 
 // 払い始めとみなす横の距離
 const START_DX = 12;
-// 消すのに要る、行の幅に対する割合
-const DELETE_RATIO = 0.4;
+// 消すのに要る、行の幅に対する割合。取り消せるので軽めにする
+const DELETE_RATIO = 0.3;
 // 速く払ったときは短くても消す。速さの下限(px/ms)と、そのときの最低の距離
 const FLING_VX = 0.8;
 const FLING_MIN_DX = 60;

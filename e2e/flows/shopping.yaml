@@ -49,21 +49,6 @@ appId: io.github.inouedaiki.shoppinglist
 - tapOn: ヨーグルト
 - assertVisible: ヨーグルト
 
-# 払って消すと少しの間だけ取り消せる。取り消さなければ消える
-- swipe:
-    from: にんじん
-    direction: LEFT
-- assertVisible: 「にんじん」を削除しました
-- tapOn: 元に戻す
-- assertVisible: にんじん
-- swipe:
-    from: にんじん
-    direction: LEFT
-- extendedWaitUntil:
-    notVisible: 「にんじん」を削除しました
-    timeout: 10000
-- assertNotVisible: にんじん
-
 # トリップの最初のチェックで店舗を聞かれ、その場で登録する
 - tapOn: 牛乳
 - assertVisible: どの店舗で買いますか
@@ -124,3 +109,19 @@ appId: io.github.inouedaiki.shoppinglist
     text: ふしぎな品物
     below: 調味料
 - assertVisible: テスト店舗
+
+# 払って消すと少しの間だけ取り消せる。取り消さなければ消える。
+# 入力欄にフォーカスがあると Maestro の要素の位置がずれるので、フォーカスの無い所で試す
+- swipe:
+    from: にんじん
+    direction: LEFT
+- assertVisible: 「にんじん」を削除しました
+- tapOn: 元に戻す
+- assertVisible: にんじん
+- swipe:
+    from: にんじん
+    direction: LEFT
+- extendedWaitUntil:
+    notVisible: 「にんじん」を削除しました
+    timeout: 10000
+- assertNotVisible: にんじん

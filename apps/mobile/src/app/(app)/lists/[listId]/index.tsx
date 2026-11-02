@@ -125,7 +125,7 @@ export default function ListScreen() {
         ListEmptyComponent={<Text className="py-12 text-center text-fg-muted">品目がありません。下の入力欄から追加してください。</Text>}
       />
       {pending && (
-        <View accessibilityLiveRegion="polite" className="mx-4 mb-2 flex-row items-center gap-2 rounded-lg border border-border bg-surface-strong py-1 pr-1 pl-4">
+        <View accessibilityLiveRegion="polite" className="mx-4 mb-2 flex-row items-center gap-2 rounded-lg border border-border bg-surface-strong py-1 pr-2 pl-4">
           <Text numberOfLines={1} className="min-w-0 flex-1 text-sm">{`「${pending.name}」を削除しました`}</Text>
           <Button variant="link" onPress={undo}>
             元に戻す

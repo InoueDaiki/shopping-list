@@ -10,10 +10,10 @@ describe("行を払って消す", () => {
     expect(isHorizontalSwipe(8, 0)).toBe(false);
   });
 
-  it("行の幅の4割を超えれば、どちらの向きでも消す", () => {
-    expect(isDeleteSwipe(170, 0, 400)).toBe(true);
-    expect(isDeleteSwipe(-170, 0, 400)).toBe(true);
-    expect(isDeleteSwipe(150, 0, 400)).toBe(false);
+  it("行の幅の3割を超えれば、どちらの向きでも消す", () => {
+    expect(isDeleteSwipe(130, 0, 400)).toBe(true);
+    expect(isDeleteSwipe(-130, 0, 400)).toBe(true);
+    expect(isDeleteSwipe(110, 0, 400)).toBe(false);
   });
 
   it("速く払えば短くても消す。戻す向きの速さでは消さない", () => {
