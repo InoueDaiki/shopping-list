@@ -15,11 +15,17 @@ appId: io.github.inouedaiki.shoppinglist
 
 # 過去に無い品目は、聞かずに未分類で入る。キーボードは閉じない
 - tapOn: 品目の名前
-- inputText: 洗剤
+- inputText: もにょもにょ
 - tapOn: 追加
 - assertVisible: 未分類
-- assertVisible: 洗剤
+- assertVisible: もにょもにょ
 - assertNotVisible: カテゴリを選ぶ
+
+# 辞書にある品目は推定で分類され、印が付く
+- inputText: 洗剤
+- tapOn: 追加
+- assertVisible: 日用品
+- assertVisible: 推定
 
 # すでにある品目は足さず、入力欄の近くで伝える
 - inputText: 洗剤
@@ -34,7 +40,7 @@ appId: io.github.inouedaiki.shoppinglist
 - assertVisible: バナナ
 - hideKeyboard
 - assertVisible: 洗剤
-- assertVisible: 未分類
+- assertVisible: 日用品
 - back
 
 # よく使う品目のチップから足す
