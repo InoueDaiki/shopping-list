@@ -55,7 +55,11 @@ export default function Lists() {
                   className="min-h-14 min-w-0 flex-1 flex-row items-center gap-2 pl-4 active:bg-surface-muted"
                 >
                   <Text className="min-w-0 shrink font-medium">{list.name}</Text>
-                  {(remaining.get(list.id) ?? 0) > 0 && <Badge>{remaining.get(list.id) ?? 0}</Badge>}
+                  {(remaining.get(list.id) ?? 0) > 0 && (
+                    <View>
+                      <Badge>{remaining.get(list.id) ?? 0}</Badge>
+                    </View>
+                  )}
                 </Pressable>
                 <Button icon variant="ghost" accessibilityLabel={`${list.name}の操作`} onPress={() => setTarget(list)}>
                   <Icon icon={EllipsisVertical} size={20} color="fg-muted" />

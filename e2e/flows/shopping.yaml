@@ -13,6 +13,7 @@ appId: io.github.inouedaiki.shoppinglist
 - tapOn: テストの店
 - assertVisible: 品目がありません。下の入力欄から追加してください。
 
+# エミュレーターではキーボードが出ないので hideKeyboard は使わない(戻る操作になる)
 # 過去に無い品目は、聞かずに未分類で入る。キーボードは閉じない
 - tapOn: 品目の名前
 - inputText: もにょもにょ
@@ -38,7 +39,6 @@ appId: io.github.inouedaiki.shoppinglist
 - tapOn: バナナ
 - assertVisible: 果物
 - assertVisible: バナナ
-- hideKeyboard
 - assertVisible: 洗剤
 - assertVisible: 日用品
 - back
@@ -47,7 +47,6 @@ appId: io.github.inouedaiki.shoppinglist
 - tapOn: スーパー
 - tapOn: 品目の名前
 - tapOn: ヨーグルト
-- hideKeyboard
 - assertVisible: ヨーグルト
 
 # トリップの最初のチェックで店舗を聞かれ、その場で登録する

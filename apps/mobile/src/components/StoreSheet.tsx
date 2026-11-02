@@ -74,7 +74,11 @@ export function StoreSheet({ listId, open, onClose }: StoreSheetProps) {
               className={cx("min-h-12 flex-row items-center justify-between gap-2 px-4 active:bg-surface-muted", index > 0 && "border-t border-border")}
             >
               <Text className="min-w-0 flex-1">{store.name}</Text>
-              {nearby && <Badge tone="success">近い</Badge>}
+              {nearby && (
+                <View>
+                  <Badge tone="success">近い</Badge>
+                </View>
+              )}
               {!nearby && distanceM !== null && distanceM < 100_000 && (
                 <Text className="text-xs text-fg-muted">{`${(distanceM / 1000).toFixed(1)} km`}</Text>
               )}
