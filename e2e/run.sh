@@ -35,4 +35,6 @@ fi
 "$adb" -s "$serial" install "$apk"
 
 export MAESTRO_CLI_NO_ANALYTICS=1 MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true
-maestro --device "$serial" test --test-output-dir output/results flows
+# 起動直後のエミュレーターでは Maestro のドライバーが途中で切れることがあるので、1回だけやり直す
+maestro --device "$serial" test --test-output-dir output/results flows ||
+  maestro --device "$serial" test --test-output-dir output/results flows
