@@ -1,5 +1,13 @@
 // データ層の組み立て。アプリに1つだけ持つ。読み込みは同期なので、最初の描画から SQLite の中身が見える
-import { DEFAULT_RATE_LIMITS, RateBudget, SyncEngine, type Id, type SyncResult } from "@shopping-list/core";
+import {
+  DEFAULT_RATE_LIMITS,
+  RateBudget,
+  SyncEngine,
+  withoutForgotten,
+  type HistoryEntry,
+  type Id,
+  type SyncResult,
+} from "@shopping-list/core";
 import { INITIAL_CATEGORIES, SheetsClient, SheetsRemote, type FetchLike } from "@shopping-list/sheets";
 
 import { auth, getAccessToken, signOut } from "../auth.ts";
@@ -52,6 +60,19 @@ function learnedOrder(storeId: Id | null): readonly Id[] | null {
     storeOrders: localStore.rows("storeOrders"),
     now: nowIso(),
   });
+}
+
+// 忘れた品目名の分を除いた履歴。候補、よく使う品目、カテゴリの引き当て、推定の学習はこれを使い、
+// 売り場の順の学習は全部の履歴を使う。元の表が変わるまで同じ配列を返す(推定の学習をやり直さない)
+let remembered: { history: unknown; forgotten: unknown; rows: readonly HistoryEntry[] } | null = null;
+
+export function rememberedHistory(): readonly HistoryEntry[] {
+  const history = localStore.rows("history");
+  const forgotten = localStore.rows("forgottenItems");
+  if (remembered?.history !== history || remembered.forgotten !== forgotten) {
+    remembered = { history, forgotten, rows: withoutForgotten(history, forgotten) };
+  }
+  return remembered.rows;
 }
 
 export const repository = new Repository({ store: localStore, newId, now: nowIso, learnedOrder });
@@ -148,6 +169,7 @@ export const syncRunner = new SyncRunner({
     // 読めなかった回と、Lists の行を読めなかった回は、リストが無いと言い切れない
     if (result.pulled && !result.issues.some((issue) => issue.table === "lists")) {
       repository.removeOrphanItems();
+      repository.removeOrphanForgottenItems();
       repository.assignStoreLists();
       repository.removeOrphanStores();
     }

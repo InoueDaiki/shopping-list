@@ -4,6 +4,7 @@ import {
   storesForList,
   type Category,
   type CategoryResolution,
+  type ForgottenItem,
   type Id,
   type Iso,
   type Item,
@@ -68,14 +69,16 @@ export class Repository {
     if (list) this.#store.commitNow([{ action: "put", table: "lists", row: { ...list, name: name.trim(), updatedAt: this.#now() } }]);
   }
 
-  // 品目と、そのリストの店舗と手の順番も一緒に消す。History は足すだけなので残す
+  // 品目と、そのリストの店舗と手の順番、忘れた品目の記録も一緒に消す。History は足すだけなので残す
   deleteList(id: Id): void {
     const at = this.#now();
     const stores = new Set(this.#store.rows("stores").filter((store) => store.listId === id).map((store) => store.id));
     const items = this.#store.rows("items").filter((item) => item.listId === id);
+    const forgotten = this.#store.rows("forgottenItems").filter((row) => row.listId === id);
     this.#store.commitNow([
       ...this.#storeRemoval(stores, at),
       ...items.map((item): LocalChange => ({ action: "delete", table: "items", id: item.id, at })),
+      ...forgotten.map((row): LocalChange => ({ action: "delete", table: "forgottenItems", id: row.id, at })),
       { action: "delete", table: "lists", id, at },
     ]);
     this.#forgetStores(stores);
@@ -131,6 +134,24 @@ export class Repository {
 
   deleteItem(id: Id): void {
     this.#store.commitNow([{ action: "delete", table: "items", id, at: this.#now() }]);
+  }
+
+  // 品目名を忘れる。そのリストで、今までに買った同じ名前(正規化して同じ)の履歴を、候補、よく使う品目、
+  // カテゴリの引き当て、推定の学習に使わなくなる。履歴は消さない。同じ名前の記録があれば時刻を進めて使い回す
+  forgetItemName(listId: Id, name: string): void {
+    const normalizedName = normalizeItemName(name);
+    if (normalizedName === "") return;
+    const now = this.#now();
+    // 端末の時計がずれて、履歴のほうが新しいことがある。そのときも今ある分は忘れる
+    const latest = this.#store
+      .rows("history")
+      .filter((entry) => entry.listId === listId && normalizeItemName(entry.name) === normalizedName)
+      .reduce((max, entry) => (Date.parse(entry.checkedAt) > Date.parse(max) ? entry.checkedAt : max), now);
+    const existing = this.#store.rows("forgottenItems").find((row) => row.listId === listId && row.normalizedName === normalizedName);
+    const row: ForgottenItem = existing
+      ? { ...existing, forgottenAt: latest, updatedAt: now }
+      : { id: this.#newId(), listId, normalizedName, forgottenAt: latest, updatedAt: now };
+    this.#store.commitNow([{ action: "put", table: "forgottenItems", row }]);
   }
 
   #item(id: Id): Item | undefined {
@@ -232,6 +253,19 @@ export class Repository {
       .rows("items")
       .filter((item) => !lists.has(item.listId))
       .map((item): LocalChange => ({ action: "delete", table: "items", id: item.id, at }));
+    this.#store.commitNow(changes);
+    return changes.length;
+  }
+
+  // リストの無い、忘れた品目の記録を墓石にする。リストを消す前にほかの端末が足した分は、
+  // 消した端末からは見えないので、同期のたびに片付ける。消した記録の数を返す
+  removeOrphanForgottenItems(): number {
+    const lists = new Set(this.#store.rows("lists").map((list) => list.id));
+    const at = this.#now();
+    const changes = this.#store
+      .rows("forgottenItems")
+      .filter((row) => !lists.has(row.listId))
+      .map((row): LocalChange => ({ action: "delete", table: "forgottenItems", id: row.id, at }));
     this.#store.commitNow(changes);
     return changes.length;
   }

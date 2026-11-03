@@ -1,9 +1,10 @@
 // 品目のカテゴリの推定を裏で走らせる。結果が出たら品目へ入れ、失敗したら未分類のままにする
 import { createCategoryInferrer, resolveCategory, type Item } from "@shopping-list/core";
 
-import { localStore, repository } from "./runtime.ts";
+import { localStore, rememberedHistory, repository } from "./runtime.ts";
 
-const inferrer = createCategoryInferrer(() => localStore.rows("history"));
+// 忘れた品目名は学習に使わない
+const inferrer = createCategoryInferrer(rememberedHistory);
 
 async function inferAndApply(item: Item): Promise<void> {
   // 追加の操作の描画を先に済ませる
@@ -13,7 +14,7 @@ async function inferAndApply(item: Item): Promise<void> {
     listId: item.listId,
     categories: localStore.rows("categories"),
     items: localStore.rows("items"),
-    history: localStore.rows("history"),
+    history: rememberedHistory(),
     inferrer,
   });
   if (categoryId !== null) repository.applyInferredCategory(item.id, categoryId);

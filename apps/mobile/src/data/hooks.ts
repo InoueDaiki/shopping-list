@@ -1,6 +1,6 @@
 // 画面の読み取り。外部のライブラリを使わず、SQLite の写しを useSyncExternalStore で読む。
 // リポジトリの commit と同期の取り込みで通知が来て、変わった表の画面だけが描き直される
-import { sectionItems, type Id, type ListDirection, type SyncTable, type TableRows } from "@shopping-list/core";
+import { sectionItems, withoutForgotten, type Id, type ListDirection, type SyncTable, type TableRows } from "@shopping-list/core";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import { SESSION_KEY } from "./repository.ts";
@@ -63,6 +63,13 @@ export function useSyncStatus(): SyncStatus {
 export function useListItems(listId: Id) {
   const items = useTable("items");
   return useMemo(() => items.filter((item) => item.listId === listId), [items, listId]);
+}
+
+// 忘れた品目名の分を除いた履歴(rememberedHistory と同じ)。候補とよく使う品目と品目の管理に使う
+export function useRememberedHistory() {
+  const history = useTable("history");
+  const forgotten = useTable("forgottenItems");
+  return useMemo(() => withoutForgotten(history, forgotten), [history, forgotten]);
 }
 
 // このリストの今の買い物の状態。時間が空いたものと、別のリストのものは無かったことにする

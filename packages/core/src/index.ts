@@ -1,6 +1,7 @@
 export * from "./category.ts";
 export * from "./constants.ts";
 export * from "./direction.ts";
+export * from "./forgotten.ts";
 export * from "./frequent.ts";
 export * from "./inference.ts";
 export * from "./inference-dictionary.ts";

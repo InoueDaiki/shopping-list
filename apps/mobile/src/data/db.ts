@@ -65,6 +65,15 @@ const MIGRATIONS: readonly Migration[] = [
     version: 3,
     sql: `ALTER TABLE stores ADD COLUMN list_id TEXT;`,
   },
+  {
+    version: 4,
+    sql: `
+      CREATE TABLE forgotten_items (
+        id TEXT PRIMARY KEY, list_id TEXT NOT NULL, normalized_name TEXT NOT NULL,
+        forgotten_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function migrate(db: Database): void {

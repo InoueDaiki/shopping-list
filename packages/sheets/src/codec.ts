@@ -2,6 +2,7 @@
 
 import type {
   CategorySource,
+  ForgottenItem,
   HistoryEntry,
   Item,
   RowIssue,
@@ -226,12 +227,24 @@ const history: Codec<HistoryEntry> = {
   ],
 };
 
+const forgottenItems: Codec<ForgottenItem> = {
+  decode: (r) => ({
+    id: r.id("id"),
+    listId: r.id("list_id"),
+    normalizedName: r.text("normalized_name"),
+    forgottenAt: r.iso("forgotten_at"),
+    updatedAt: r.iso("updated_at"),
+  }),
+  encode: (row) => [row.id, row.listId, row.normalizedName, row.forgottenAt, row.updatedAt, null],
+};
+
 const CODECS: { [T in SyncTable]: Codec<TableRows[T]> } = {
   lists: named,
   categories: named,
   stores,
   items,
   history,
+  forgottenItems,
   storeOrders: {
     decode: (r) => ({
       storeId: r.id("store_id"),

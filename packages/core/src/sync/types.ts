@@ -3,6 +3,7 @@
 
 import type {
   Category,
+  ForgottenItem,
   HistoryEntry,
   Id,
   Iso,
@@ -18,6 +19,7 @@ export interface TableRows {
   stores: Store;
   items: Item;
   storeOrders: StoreOrder;
+  forgottenItems: ForgottenItem;
   history: HistoryEntry;
 }
 

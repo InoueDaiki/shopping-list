@@ -28,6 +28,7 @@ const MUTABLE_TABLES: readonly MutableTable[] = [
   "stores",
   "items",
   "storeOrders",
+  "forgottenItems",
 ];
 
 type LocalRows = { [T in SyncTable]: Map<Id, TableRows[T]> };
@@ -39,6 +40,7 @@ export class MemoryLocalStore implements LocalStore {
     stores: new Map(),
     items: new Map(),
     storeOrders: new Map(),
+    forgottenItems: new Map(),
     history: new Map(),
   };
   #ops: PendingOp[] = [];
@@ -110,6 +112,7 @@ export class MemoryRemoteStore implements RemoteStore {
     stores: [],
     items: [],
     storeOrders: [],
+    forgottenItems: [],
     history: [],
   };
   // 表ごとの、行の位置から墓石の時刻へ
@@ -119,6 +122,7 @@ export class MemoryRemoteStore implements RemoteStore {
     stores: new Map(),
     items: new Map(),
     storeOrders: new Map(),
+    forgottenItems: new Map(),
   };
   readonly calls = { locate: 0, write: 0, pull: 0 };
   readonly issues: RowIssue[] = [];
@@ -216,6 +220,7 @@ export class MemoryRemoteStore implements RemoteStore {
         stores: this.#liveRows("stores"),
         items: this.#liveRows("items"),
         storeOrders: this.#liveRows("storeOrders"),
+        forgottenItems: this.#liveRows("forgottenItems"),
       },
       history: history.slice(cursor?.position ?? 0),
       historyCursor: { position: history.length, lastId: history.at(-1)?.id ?? null },

@@ -1,4 +1,4 @@
-import type { Category, Id, Item } from "@shopping-list/core";
+import { withoutForgotten, type Category, type Id, type Item } from "@shopping-list/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { inferItemCategory } from "./inference.ts";
@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({ store: null as never as SqliteLocalStore, repo
 
 vi.mock("./runtime.ts", () => ({
   localStore: { rows: (table: "items") => mocks.store.rows(table) },
+  rememberedHistory: () => withoutForgotten(mocks.store.rows("history"), mocks.store.rows("forgottenItems")),
   repository: { applyInferredCategory: (id: Id, categoryId: Id) => mocks.repository.applyInferredCategory(id, categoryId) },
 }));
 
@@ -61,6 +62,22 @@ describe("inferItemCategory", () => {
   });
 
   it("分からない品目は未分類のままにする", async () => {
+    const item = add("架空の品物");
+    inferItemCategory(item);
+
+    await nextTask();
+    expect(itemOf(item.id)?.categoryId).toBeNull();
+  });
+
+  it("忘れた品目名の履歴からはカテゴリを引かない", async () => {
+    mocks.store.commitNow([
+      {
+        action: "put",
+        table: "history",
+        row: { id: "h1", listId: "list", name: "架空の品物", categoryId: "cat-dairy", categorySource: "user", storeId: null, tripId: null, checkedAt: "2027-12-31T00:00:00.000Z", checkedSeq: 0 },
+      },
+    ]);
+    repo.forgetItemName("list", "架空の品物");
     const item = add("架空の品物");
     inferItemCategory(item);
 

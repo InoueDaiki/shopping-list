@@ -306,6 +306,58 @@ describe("Repository", () => {
     expect(repo.addStore("list", "別の店", null)).not.toBe(id);
   });
 
+  describe("forgetItemName", () => {
+    const bought = (id: Id, listId: Id, name: string, checkedAt: string): LocalChange => ({
+      action: "put",
+      table: "history",
+      row: { id, listId, name, categoryId: null, categorySource: null, storeId: null, tripId: null, checkedAt, checkedSeq: 0 },
+    });
+
+    it("正規化した名前で記録し、同じ名前をもう一度忘れたら記録を使い回す", () => {
+      repo.forgetItemName("list", " トマト ");
+      expect(store.rows("forgottenItems")).toEqual([
+        { id: "id-1", listId: "list", normalizedName: "とまと", forgottenAt: new Date(START).toISOString(), updatedAt: new Date(START).toISOString() },
+      ]);
+      clock += 1000;
+      repo.forgetItemName("list", "とまと");
+      expect(store.rows("forgottenItems")).toEqual([
+        expect.objectContaining({ id: "id-1", forgottenAt: new Date(clock).toISOString(), updatedAt: new Date(clock).toISOString() }),
+      ]);
+      repo.forgetItemName("other", "とまと");
+      repo.forgetItemName("list", "  ");
+      expect(store.rows("forgottenItems")).toHaveLength(2);
+    });
+
+    it("時計がずれて履歴のほうが新しくても、今ある分を忘れる", () => {
+      const future = new Date(START + 60_000).toISOString();
+      store.commitNow([bought("h1", "list", "トマト", future)]);
+      repo.forgetItemName("list", "トマト");
+      expect(store.rows("forgottenItems")[0]).toMatchObject({ forgottenAt: future, updatedAt: new Date(START).toISOString() });
+    });
+
+    it("リストを消すと忘れた記録も墓石の操作になり、リストの無い記録は同期のたびに片付ける", async () => {
+      const remote = new MemoryRemoteStore();
+      const engine = new SyncEngine({ local: store, remote });
+      const listId = repo.addList("架空のリスト");
+      repo.forgetItemName(listId, "トマト");
+      await engine.sync();
+      clock += 1000;
+
+      repo.deleteList(listId);
+      expect(store.rows("forgottenItems")).toEqual([]);
+      await engine.sync();
+      expect(remote.deletedAt.forgottenItems.size).toBe(1);
+
+      const kept = repo.addList("残るリスト");
+      repo.forgetItemName(kept, "牛乳");
+      const orphan = { id: "orphan", listId: "deleted-list", normalizedName: "なす", forgottenAt: "", updatedAt: "" };
+      store.commitNow([{ action: "put", table: "forgottenItems", row: orphan }]);
+      expect(repo.removeOrphanForgottenItems()).toBe(1);
+      expect(store.rows("forgottenItems").map((row) => row.listId)).toEqual([kept]);
+      expect(repo.removeOrphanForgottenItems()).toBe(0);
+    });
+  });
+
   it("リストの無い品目を墓石にする", () => {
     const listId = repo.addList("架空のリスト");
     const kept = repo.addItem(listId, "残る品物", NONE);

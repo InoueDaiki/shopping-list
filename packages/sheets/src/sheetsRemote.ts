@@ -53,6 +53,7 @@ const VERSION_COLUMNS: Record<MutableTable, string> = {
   stores: "updated_at",
   items: "updated_at",
   storeOrders: "edited_at",
+  forgottenItems: "updated_at",
 };
 const DELETED_AT = "deleted_at";
 const TABLES: readonly MutableTable[] = [
@@ -61,6 +62,7 @@ const TABLES: readonly MutableTable[] = [
   "stores",
   "items",
   "storeOrders",
+  "forgottenItems",
 ];
 
 // Items の更新で書く列の範囲([始まり, 終わり) の組)。part が無ければ行全体
@@ -131,7 +133,7 @@ function liveRows<T extends MutableTable>(table: T, rows: ReadRow<T>[]): TableRo
 }
 
 function emptyTables(): TableSnapshot {
-  return { lists: [], categories: [], stores: [], items: [], storeOrders: [] };
+  return { lists: [], categories: [], stores: [], items: [], storeOrders: [], forgottenItems: [] };
 }
 
 export interface SheetsRemoteOptions {

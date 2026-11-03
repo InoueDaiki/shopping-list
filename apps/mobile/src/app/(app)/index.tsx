@@ -100,6 +100,7 @@ export default function Lists() {
         onCancel={() => setTarget(null)}
         items={[
           { label: "名前を変える", onPress: () => setRenaming(target) },
+          { label: "品目の管理", onPress: () => target && router.push(`/lists/${target.id}/registered`) },
           { label: "削除する", tone: "danger", onPress: () => setDeleting(target) },
         ]}
       />

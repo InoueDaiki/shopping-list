@@ -74,3 +74,15 @@ export interface StoreOrder {
   categoryIds: Id[];
   editedAt: Iso;
 }
+
+// 品目名を忘れた記録。同じリストで、正規化した名前が同じで、forgottenAt までに買った履歴を、
+// 候補、よく使う品目、カテゴリの引き当て、推定の学習から除く(withoutForgotten)。履歴は消さない
+export interface ForgottenItem {
+  id: Id;
+  listId: Id;
+  // normalizeItemName の結果
+  normalizedName: string;
+  // これまでに買った分を忘れる。忘れた後にまた買えば、その分からまた出る
+  forgottenAt: Iso;
+  updatedAt: Iso;
+}

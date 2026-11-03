@@ -72,6 +72,28 @@ describe("buildSetupRequests", () => {
     ).toContain("REGEXMATCH(TO_TEXT(K2)");
   });
 
+  it("忘れた品目の記録は、ID と日時の形を検査し、リストは Lists のプルダウン", () => {
+    const forgotten = TABLE_SHEETS.forgottenItems;
+    const at = (name: string) => forgotten.columns.findIndex((c) => c.name === name);
+    expect(forgotten.columns.map((c) => c.name)).toEqual([
+      "id",
+      "list_id",
+      "normalized_name",
+      "forgotten_at",
+      "updated_at",
+      "deleted_at",
+    ]);
+    expect(ruleOn(forgotten.sheetId, 0).condition.values[0].userEnteredValue).toContain("REGEXMATCH(TO_TEXT(A2)");
+    expect(ruleOn(forgotten.sheetId, at("list_id"))).toMatchObject({
+      condition: { type: "ONE_OF_RANGE", values: [{ userEnteredValue: "=Lists!$A$2:$A" }] },
+      strict: true,
+    });
+    expect(ruleOn(forgotten.sheetId, at("forgotten_at")).condition.values[0].userEnteredValue).toContain(
+      "REGEXMATCH(TO_TEXT(D2)",
+    );
+    expect(ruleOn(forgotten.sheetId, at("normalized_name"))).toBeUndefined();
+  });
+
   it("店舗のリストは空を許す Lists のプルダウン", () => {
     const stores = TABLE_SHEETS.stores;
     const index = stores.columns.findIndex((c) => c.name === "list_id");
@@ -89,6 +111,7 @@ describe("buildSetupRequests", () => {
       "Stores",
       "Items",
       "StoreOrders",
+      "ForgottenItems",
     ]);
   });
 

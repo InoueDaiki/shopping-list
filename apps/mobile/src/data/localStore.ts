@@ -4,6 +4,7 @@ import {
   changeId,
   rowId,
   type Category,
+  type ForgottenItem,
   type HistoryCursor,
   type HistoryEntry,
   type Id,
@@ -124,6 +125,20 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
       editedAt: row.edited_at as string,
     }),
   },
+  forgottenItems: {
+    name: "forgotten_items",
+    key: "id",
+    columns: ["id", "list_id", "normalized_name", "forgotten_at", "updated_at"],
+    orderBy: "forgotten_at, id",
+    encode: (row: ForgottenItem) => [row.id, row.listId, row.normalizedName, row.forgottenAt, row.updatedAt],
+    decode: (row) => ({
+      id: row.id as Id,
+      listId: row.list_id as Id,
+      normalizedName: row.normalized_name as string,
+      forgottenAt: row.forgotten_at as string,
+      updatedAt: row.updated_at as string,
+    }),
+  },
   history: {
     name: "history",
     key: "id",
@@ -154,7 +169,7 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
   },
 };
 
-const MUTABLE_TABLES: readonly MutableTable[] = ["lists", "categories", "stores", "items", "storeOrders"];
+const MUTABLE_TABLES: readonly MutableTable[] = ["lists", "categories", "stores", "items", "storeOrders", "forgottenItems"];
 const ALL_TABLES: readonly SyncTable[] = [...MUTABLE_TABLES, "history"];
 
 // 表の型の違いをここで消す。行の型は TABLES の組み合わせが保つ

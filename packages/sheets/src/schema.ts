@@ -2,7 +2,7 @@
 
 import type { SyncTable } from "@shopping-list/core";
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const ID_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
 export const ID_LIST_PATTERN = "^([A-Za-z0-9_-]{1,64}(,[A-Za-z0-9_-]{1,64})*)?$";
@@ -39,7 +39,8 @@ export type SheetName =
   | "History"
   | "StoreOrders"
   | "Meta"
-  | "Presence";
+  | "Presence"
+  | "ForgottenItems";
 
 export interface SheetDef {
   name: SheetName;
@@ -166,6 +167,21 @@ export const SHEETS: readonly SheetDef[] = [
     rowCount: 50,
     columns: [id("device_id"), id("list_id"), iso("until"), iso("updated_at")],
   },
+  {
+    // 品目名を忘れた記録。リストごとに、この時刻までに買った同じ名前の履歴を、候補などから除く
+    name: "ForgottenItems",
+    sheetId: 109,
+    rowCount: 500,
+    columns: [
+      id("id"),
+      ref("list_id", "Lists"),
+      // 正規化した品目名(normalizeItemName)。表記の揺れをまとめて忘れる
+      text("normalized_name"),
+      iso("forgotten_at"),
+      iso("updated_at"),
+      iso("deleted_at"),
+    ],
+  },
 ];
 
 function sheet(name: SheetName): SheetDef {
@@ -185,6 +201,7 @@ export const TABLE_SHEETS: Readonly<Record<SyncTable, SheetDef>> = {
   stores: sheet("Stores"),
   items: sheet("Items"),
   storeOrders: sheet("StoreOrders"),
+  forgottenItems: sheet("ForgottenItems"),
   history: sheet("History"),
 };
 
@@ -211,6 +228,7 @@ export interface Upgrade {
 export const UPGRADES: readonly Upgrade[] = [
   { from: 3, columns: { Stores: ["list_id"] }, sheets: [] },
   { from: 4, columns: { Meta: ["last_write"] }, sheets: ["Presence"] },
+  { from: 5, columns: {}, sheets: ["ForgottenItems"] },
 ];
 
 // version から今の版までに足したもの。上げられない版なら null

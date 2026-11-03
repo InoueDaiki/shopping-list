@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AddItemBar } from "../../../../components/AddItemBar.tsx";
 import { ItemRow } from "../../../../components/ItemRow.tsx";
+import { UndoNotice } from "../../../../components/UndoNotice.tsx";
 import { usePendingDelete } from "../../../../components/usePendingDelete.ts";
 import { MemoSheet } from "../../../../components/MemoSheet.tsx";
 import { StoreSheet } from "../../../../components/StoreSheet.tsx";
@@ -25,6 +26,9 @@ import { listRows, type ListRow } from "../../../../logic/listRows.ts";
 // 帯の下の余白(pb-safe-or-3 の 3)
 const BAR_BOTTOM_PADDING = 12;
 
+const deleteItem = (item: Item) => repository.deleteItem(item.id);
+const itemKey = (item: Item) => item.id;
+
 // 品目の一覧。今の店舗の順に、カテゴリごとに並べる
 export default function ListScreen() {
   const { listId } = useLocalSearchParams<{ listId: Id }>();
@@ -34,7 +38,7 @@ export default function ListScreen() {
   const session = useShopping(listId);
   const storeId = session?.storeId ?? null;
   const direction = session?.direction.direction ?? "asc";
-  const { pending, hiddenId, remove, undo } = usePendingDelete();
+  const { pending, hiddenKey: hiddenId, remove, undo } = usePendingDelete(deleteItem, itemKey);
   const sections = useSections(listId, storeId, direction, hiddenId);
   const rows = useMemo(() => listRows(sections), [sections]);
   const tones = useMemo(() => categoryToneMap(categories), [categories]);
@@ -124,14 +128,7 @@ export default function ListScreen() {
         ListHeaderComponent={<SyncNoticeBar className="mx-4 mt-2" />}
         ListEmptyComponent={<Text className="py-12 text-center text-fg-muted">品目がありません。下の入力欄から追加してください。</Text>}
       />
-      {pending && (
-        <View accessibilityLiveRegion="polite" className="mx-4 mb-2 flex-row items-center gap-2 rounded-lg border border-border bg-surface-strong py-1 pr-2 pl-4">
-          <Text numberOfLines={1} className="min-w-0 flex-1 text-sm">{`「${pending.name}」を削除しました`}</Text>
-          <Button variant="link" onPress={undo}>
-            元に戻す
-          </Button>
-        </View>
-      )}
+      {pending && <UndoNotice className="mx-4 mb-2" message={`「${pending.name}」を削除しました`} onUndo={undo} />}
       <View className="gap-2 border-t border-border bg-surface px-4 pt-2 pb-safe-or-3">
         <View className="flex-row items-center gap-2">
           <Pressable

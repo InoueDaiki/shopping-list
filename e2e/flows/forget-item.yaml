@@ -1,0 +1,47 @@
+# 品目の管理で登録済みの品目名を忘れると、入力の候補とよく使う品目に出なくなる。
+# デモモードの初期データ(apps/mobile/src/data/demo.ts)の履歴を使う
+appId: io.github.inouedaiki.shoppinglist
+---
+- launchApp:
+    clearState: true
+
+# 忘れる前は、よく使う品目にも入力の候補にも出る
+- tapOn: スーパー
+- tapOn: 品目の名前
+- assertVisible: トマト
+- inputText: トマ
+- assertVisible: トマト
+# エミュレーターではキーボードが出ないので、戻る操作で一覧へ戻る
+- back
+
+# 品目の管理を開く。入力欄にフォーカスがあると Maestro の要素の位置がずれるので、検索には触らずに払う
+- tapOn: スーパーの操作
+- tapOn: 品目の管理
+- assertVisible: 品目の管理
+- assertVisible: トマト
+- assertVisible: 豆腐
+
+# 払うと少しの間だけ取り消せる。取り消さなければ消える
+- swipe:
+    from: トマト
+    direction: LEFT
+- assertVisible: 「トマト」を削除しました
+- tapOn: 元に戻す
+- assertVisible: トマト
+- swipe:
+    from: トマト
+    direction: LEFT
+- extendedWaitUntil:
+    notVisible: 「トマト」を削除しました
+    timeout: 10000
+- assertNotVisible: トマト
+- assertVisible: 豆腐
+- back
+
+# よく使う品目にも入力の候補にも出ない。ほかの品目は出る
+- tapOn: スーパー
+- tapOn: 品目の名前
+- assertVisible: 豆腐
+- assertNotVisible: トマト
+- inputText: トマ
+- assertNotVisible: トマト

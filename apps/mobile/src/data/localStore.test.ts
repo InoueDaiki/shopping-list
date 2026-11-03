@@ -28,7 +28,7 @@ const put = (row: Item): LocalChange => ({ action: "put", table: "items", row })
 
 function emptyApply(overrides: Partial<RemoteApply> = {}): RemoteApply {
   return {
-    tables: { lists: [], categories: [], stores: [], items: [], storeOrders: [] },
+    tables: { lists: [], categories: [], stores: [], items: [], storeOrders: [], forgottenItems: [] },
     history: [],
     historyCursor: { position: 2, lastId: null },
     keep: {},
@@ -46,6 +46,18 @@ describe("migrate", () => {
     `);
     const store = new SqliteLocalStore(db);
     expect(store.rows("stores")[0]).toMatchObject({ id: "store-1", lat: 1.5, listId: null });
+  });
+
+  it("前の版の写しに忘れた品目の表を足し、読み書きできる", () => {
+    const db = openTestDatabase();
+    new SqliteLocalStore(db);
+    db.exec("DROP TABLE forgotten_items");
+    db.exec("PRAGMA user_version = 3");
+    const store = new SqliteLocalStore(db);
+    expect(store.rows("forgottenItems")).toEqual([]);
+    const row = { id: "forget-1", listId: "list-1", normalizedName: "ぎゅうにゅう", forgottenAt: "2028-01-02T00:00:00.000Z", updatedAt: "2028-01-02T00:00:00.000Z" };
+    store.commitNow([{ action: "put", table: "forgottenItems", row }]);
+    expect(store.rows("forgottenItems")).toEqual([row]);
   });
 });
 
@@ -85,6 +97,7 @@ describe("SqliteLocalStore", () => {
     old.commitNow([put(item())]);
     db.exec("ALTER TABLE items DROP COLUMN checked_updated_at");
     db.exec("ALTER TABLE stores DROP COLUMN list_id");
+    db.exec("DROP TABLE forgotten_items");
     db.exec("PRAGMA user_version = 1");
 
     expect(new SqliteLocalStore(db).rows("items")[0]?.checkedUpdatedAt).toBe(AT);
@@ -150,6 +163,7 @@ describe("SqliteLocalStore", () => {
           categories: [],
           stores: [],
           storeOrders: [],
+          forgottenItems: [],
           items: [item({ id: "pending", name: "シート" }), item({ id: "new" })],
         },
       }),
@@ -188,7 +202,7 @@ describe("SqliteLocalStore", () => {
     await store.ackOps((await store.pendingOps(10)).map((op) => op.seq));
     const listener = vi.fn();
     store.subscribe("items", listener);
-    await store.applyRemote(emptyApply({ tables: { lists: [], categories: [], stores: [], storeOrders: [], items: [row] } }));
+    await store.applyRemote(emptyApply({ tables: { lists: [], categories: [], stores: [], storeOrders: [], forgottenItems: [], items: [row] } }));
     expect(listener).not.toHaveBeenCalled();
   });
 

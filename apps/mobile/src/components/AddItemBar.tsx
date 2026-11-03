@@ -3,9 +3,9 @@ import { Button, Chip, cx, Input, Text } from "@shopping-list/ui-native";
 import { type ComponentRef, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Keyboard, Pressable, ScrollView, type TextInput, View } from "react-native";
 
-import { useListItems, useTable } from "../data/hooks.ts";
+import { useListItems, useRememberedHistory } from "../data/hooks.ts";
 import { inferItemCategory } from "../data/inference.ts";
-import { localStore, repository } from "../data/runtime.ts";
+import { localStore, rememberedHistory, repository } from "../data/runtime.ts";
 import { openItemNamed } from "../logic/listRows.ts";
 
 // 候補の行数の上限。キーボードと合わせて、リストを隠し切らない高さに抑える
@@ -21,7 +21,8 @@ interface AddSuggestionsProps {
 // 買い物中のチェックでは履歴を購読せず、計算もしない
 function AddSuggestions({ listId, query, onSelect }: AddSuggestionsProps) {
   const items = useListItems(listId);
-  const history = useTable("history");
+  // 忘れた品目名は出さない
+  const history = useRememberedHistory();
   const deferred = useDeferredValue(query);
   const blank = deferred.trim() === "";
 
@@ -98,7 +99,7 @@ export function AddItemBar({ listId, onShowItem }: AddItemBarProps) {
       listId,
       categories: localStore.rows("categories"),
       items: localStore.rows("items"),
-      history: localStore.rows("history"),
+      history: rememberedHistory(),
     });
     const item = repository.addItem(listId, itemName, category);
     if (item?.categoryId === null) inferItemCategory(item);
