@@ -14,7 +14,8 @@ appId: io.github.inouedaiki.shoppinglist
 # エミュレーターではキーボードが出ないので、戻る操作で一覧へ戻る
 - back
 
-# 品目の管理を開く。入力欄にフォーカスがあると Maestro の要素の位置がずれるので、検索には触らずに払う
+# 品目の管理を開く。入力欄にフォーカスがあると Maestro の要素の位置がずれるので、検索には触らずに払う。
+# 払う起点は文字の中ほどで左に寄っているので、右へ払って距離を取る
 - tapOn: スーパーの操作
 - tapOn: 品目の管理
 - assertVisible: 品目の管理
@@ -24,13 +25,13 @@ appId: io.github.inouedaiki.shoppinglist
 # 払うと少しの間だけ取り消せる。取り消さなければ消える
 - swipe:
     from: トマト
-    direction: LEFT
+    direction: RIGHT
 - assertVisible: 「トマト」を削除しました
 - tapOn: 元に戻す
 - assertVisible: トマト
 - swipe:
     from: トマト
-    direction: LEFT
+    direction: RIGHT
 - extendedWaitUntil:
     notVisible: 「トマト」を削除しました
     timeout: 10000
