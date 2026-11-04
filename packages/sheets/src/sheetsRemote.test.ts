@@ -218,11 +218,11 @@ describe("SheetsRemote", () => {
 
   describe("前の版のシートを上げる", () => {
     const STORE_V3 = ["store1", "架空の店", 1.5, 2.5, T(0), T(0), null];
-    // 前の版のアプリが作った形に戻す。版 5 は ForgottenItems が無く、版 4 は Presence と Meta の印の列も無く、
-    // 版 3 は Stores の list_id も無い
-    const downgrade = (version: 3 | 4 | 5) => {
+    // 前の版のアプリが作った形に戻す。版 6 は形が同じで Items の list_id を空にできないだけ、版 5 は ForgottenItems が無く、
+    // 版 4 は Presence と Meta の印の列も無く、版 3 は Stores の list_id も無い
+    const downgrade = (version: 3 | 4 | 5 | 6) => {
       const remove = (title: string) => server.sheets.splice(server.sheets.indexOf(server.sheet(title)), 1);
-      remove("ForgottenItems");
+      if (version <= 5) remove("ForgottenItems");
       const meta = server.sheet("Meta");
       meta.grid[1] = [version];
       const stores = server.sheet("Stores");
@@ -262,7 +262,7 @@ describe("SheetsRemote", () => {
       }
     };
 
-    describe.each([3, 4, 5] as const)("版 %i から", (version) => {
+    describe.each([3, 4, 5, 6] as const)("版 %i から", (version) => {
       beforeEach(() => downgrade(version));
 
       it("同期の前に上げ、列をずらさず、行を読める", async () => {
@@ -310,7 +310,8 @@ describe("SheetsRemote", () => {
         await expect(surveySpreadsheet(client, spreadsheetId)).resolves.toMatchObject({ outdated: false });
       });
 
-      it("書き込みが拒否されたら版は上がらず、次に上げ直せる", async () => {
+      // 版 6 からはシートを足さない
+      it.skipIf(version === 6)("書き込みが拒否されたら版は上がらず、次に上げ直せる", async () => {
         server.rejects = (request) => "addSheet" in request;
         const { engine } = device();
         expect((await engine.sync()).status).toBe("failed");
@@ -329,7 +330,7 @@ describe("SheetsRemote", () => {
         expect(server.sheet("History").grid[0]?.[0]).toBe("id");
       });
 
-      it("足すシートに規則と保護を掛け、番号が重なっても足せる", async () => {
+      it.skipIf(version === 6)("足すシートに規則と保護を掛け、番号が重なっても足せる", async () => {
         server.sheets.push({ sheetId: 109, title: "家計簿", grid: [] });
         await device().engine.sync();
         const presence = server.sheet("ForgottenItems");
@@ -340,6 +341,18 @@ describe("SheetsRemote", () => {
             (r) => r.setDataValidation?.range.sheetId === presence.sheetId && r.setDataValidation.range.startColumnIndex === 3,
           ),
         ).toBe(true);
+      });
+
+      it("上げた後はリストの無い品目(野良品目)を2端末で受け渡せる", async () => {
+        const a = device();
+        await a.engine.sync();
+        const stray: Item = { ...item("stray1", T(5)), listId: null };
+        await a.local.commit([putItem(stray)]);
+        await a.engine.sync();
+        expect(server.sheet("Items").grid.find((row) => row[0] === "stray1")?.[1] ?? null).toBeNull();
+        const b = device();
+        await b.engine.sync();
+        expect(b.local.rows.items.get("stray1")).toEqual(stray);
       });
 
       it("上げた後は忘れた品目の記録を2端末で受け渡せる", async () => {
@@ -407,6 +420,15 @@ describe("SheetsRemote", () => {
         await other.engine.sync();
         expect(other.local.rows.stores.get("store1")?.listId).toBe("list1");
       });
+    });
+
+    it("版 6 からは版のセルだけを書く", async () => {
+      downgrade(6);
+      await device().engine.sync();
+      expect(server.count(":batchUpdate")).toBe(1);
+      expect(server.requests).toHaveLength(1);
+      expect(server.requests[0]?.updateCells?.rows).toBeDefined();
+      expect(server.sheet("Meta").grid[1]?.[0]).toBe(7);
     });
 
     it("版 4 の Meta の B 列が使われていれば、触らずに止める", async () => {

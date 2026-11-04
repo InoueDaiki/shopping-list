@@ -154,6 +154,15 @@ describe("codec", () => {
     expect(decodeRow("stores", ["s1", "店", 91, 139, AT, AT], 2).kind).toBe("issue");
   });
 
+  it("list_id が空の品目(野良品目)は null で往復し、ID の形でなければ不正な行にする", () => {
+    const stray: Item = { ...item, listId: null };
+    const cells = asRead(encodeRow("items", stray));
+    expect(cells[1]).toBe("");
+    expect(decodeRow("items", cells, 2)).toEqual({ kind: "row", row: stray, deletedAt: null });
+    cells[1] = "リスト!";
+    expect(decodeRow("items", cells, 2).kind).toBe("issue");
+  });
+
   it("表の列の数と encode の列の数が合う", () => {
     expect(encodeRow("items", item)).toHaveLength(TABLE_SHEETS.items.columns.length);
   });

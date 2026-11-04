@@ -1,6 +1,7 @@
 import { DAY_MS, FREQUENT_HALF_LIFE_DAYS, FREQUENT_LIMIT, SUGGESTION_LIMIT } from "./constants.ts";
+import { withoutForgotten } from "./forgotten.ts";
 import { normalizeItemName } from "./normalize.ts";
-import type { HistoryEntry, Id, Iso, Item } from "./types.ts";
+import type { ForgottenItem, HistoryEntry, Id, Iso, Item, ShoppingList } from "./types.ts";
 
 export interface FrequentItem {
   // いちばん新しい記録の表記とカテゴリ
@@ -102,4 +103,56 @@ export function itemSuggestions(input: ItemSuggestionsInput): ItemSuggestion[] {
     .filter((item) => matches(item) && !seen.has(item.normalizedName))
     .slice(0, limit - suggestions.length);
   return [...suggestions, ...fromOthers.map((item) => ({ ...item, origin: "otherList" as const }))];
+}
+
+export interface CrossListSuggestionsInput {
+  query: string;
+  // 候補を出すリスト。ここに無いリスト(消したリスト)の履歴は出さない。同点はこの sort の順
+  lists: readonly ShoppingList[];
+  history: readonly HistoryEntry[];
+  // 忘れた品目名の記録。忘れた分の履歴を除く(withoutForgotten)。除いた履歴を渡しても同じになる
+  forgotten: readonly ForgottenItem[];
+  // 今リストにある品目。そのリストの候補から除く。チェック済みでも、リストにある間は除く
+  items: readonly Item[];
+  now: Iso;
+  limit?: number;
+}
+
+export interface CrossListSuggestion extends FrequentItem {
+  // この候補を選んだときに足すリスト
+  listId: Id;
+}
+
+// すべてのリストをまたいだ入力中の候補。品目の追加画面(リストを決めずに開く)で使う。
+// 同じ名前でもリストごとに別の候補にする(牛乳(リスト A)、牛乳(リスト B))。照合とスコアは
+// itemSuggestions と同じで、リストをまたいでスコアの高い順に並べる
+export function crossListSuggestions(input: CrossListSuggestionsInput): CrossListSuggestion[] {
+  const query = normalizeItemName(input.query);
+  if (query === "") return [];
+  const limit = input.limit ?? SUGGESTION_LIMIT;
+  const sortOf = new Map(input.lists.map((list) => [list.id, list.sort]));
+  const byList = new Map<Id, HistoryEntry[]>();
+  for (const entry of withoutForgotten(input.history, input.forgotten)) {
+    if (!sortOf.has(entry.listId)) continue;
+    const entries = byList.get(entry.listId);
+    if (entries) entries.push(entry);
+    else byList.set(entry.listId, [entry]);
+  }
+
+  const suggestions = [...byList].flatMap(([listId, entries]) => {
+    const onList = namesOnList(input.items, listId);
+    return scoreEntries(entries, input.now)
+      .filter((item) => item.normalizedName.includes(query) && !onList.has(item.normalizedName))
+      .map((item): CrossListSuggestion => ({ ...item, listId }));
+  });
+  const listOrder = (a: CrossListSuggestion, b: CrossListSuggestion) =>
+    (sortOf.get(a.listId) ?? 0) - (sortOf.get(b.listId) ?? 0) || (a.listId < b.listId ? -1 : a.listId > b.listId ? 1 : 0);
+  return suggestions
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        (a.normalizedName < b.normalizedName ? -1 : a.normalizedName > b.normalizedName ? 1 : 0) ||
+        listOrder(a, b),
+    )
+    .slice(0, limit);
 }

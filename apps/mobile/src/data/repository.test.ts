@@ -306,6 +306,87 @@ describe("Repository", () => {
     expect(repo.addStore("list", "別の店", null)).not.toBe(id);
   });
 
+  describe("野良品目", () => {
+    const stray = (name: string, categoryId: Id | null = null) =>
+      repo.addStrayItem(name, categoryId ? { categoryId, categorySource: "inferred" } : NONE);
+    const history = (id: Id, listId: Id, name: string, categoryId: Id): LocalChange => ({
+      action: "put",
+      table: "history",
+      row: { id, listId, name, categoryId, categorySource: "history", storeId: null, tripId: null, checkedAt: new Date(START).toISOString(), checkedSeq: 0 },
+    });
+
+    beforeEach(() => {
+      store.commitNow(
+        CATEGORIES.map((id, index): LocalChange => ({ action: "put", table: "categories", row: { id, name: id, sort: index + 1, updatedAt: "" } })),
+      );
+    });
+
+    it("リストを持たずに足し、同じ名前の野良品目は足さない。リストの品目とは別に数える", () => {
+      const listId = repo.addList("架空のリスト");
+      repo.addItem(listId, "ぎゅうにゅう", NONE);
+      const item = stray(" ぎゅうにゅう ");
+      expect(item).toMatchObject({ listId: null, name: "ぎゅうにゅう", checked: false });
+      expect(stray("ギュウニュウ")).toBeNull();
+      expect(stray("  ")).toBeNull();
+      expect(store.rows("items").filter((row) => row.listId === null)).toHaveLength(1);
+    });
+
+    it("リストへ移し、移す先の記録でカテゴリを引き直す", () => {
+      const listId = repo.addList("架空のリスト");
+      store.commitNow([history("h1", listId, "架空の牛乳", "b")]);
+      const item = stray("架空の牛乳", "a")!;
+      clock += 1000;
+      const moved = repo.moveStrayItem(item.id, listId);
+      expect(moved).toMatchObject({ id: item.id, listId, categoryId: "b", categorySource: "history", updatedAt: new Date(clock).toISOString() });
+      expect(itemOf(item.id)).toEqual(moved);
+      // もう野良品目ではないので、もう一度は移さない
+      expect(repo.moveStrayItem(item.id, listId)).toBeNull();
+    });
+
+    it("利用者が決めたカテゴリと、記録の無い品目のカテゴリはそのまま移す", () => {
+      const listId = repo.addList("架空のリスト");
+      store.commitNow([history("h1", listId, "架空の牛乳", "b")]);
+      const decided = stray("架空の牛乳")!;
+      repo.updateItem(decided.id, { categoryId: "c" });
+      expect(repo.moveStrayItem(decided.id, listId)).toMatchObject({ categoryId: "c", categorySource: "user" });
+      const unknown = stray("ふしぎな品物", "a")!;
+      expect(repo.moveStrayItem(unknown.id, listId)).toMatchObject({ categoryId: "a", categorySource: "inferred" });
+    });
+
+    it("移す先に同じ名前の買っていない品目があれば、野良品目を消してそれを返す", () => {
+      const listId = repo.addList("架空のリスト");
+      const existing = repo.addItem(listId, "ぎゅうにゅう", NONE)!;
+      const item = stray("ギュウニュウ")!;
+      expect(repo.moveStrayItem(item.id, listId)).toEqual(existing);
+      expect(itemOf(item.id)).toBeUndefined();
+    });
+
+    it("無いリストへは移さない", () => {
+      const item = stray("架空の牛乳")!;
+      expect(repo.moveStrayItem(item.id, "deleted-list")).toBeNull();
+      expect(itemOf(item.id)?.listId).toBeNull();
+    });
+
+    it("チェックせず、リストの片付けとリストの削除では消さない", () => {
+      const listId = repo.addList("架空のリスト");
+      const item = stray("架空の牛乳")!;
+      expect(repo.checkItem(item.id)).toBe(false);
+      expect(itemOf(item.id)?.checked).toBe(false);
+      expect(repo.isShopping()).toBe(false);
+      expect(repo.removeOrphanItems()).toBe(0);
+      repo.deleteList(listId);
+      expect(itemOf(item.id)).toBeDefined();
+    });
+
+    it("消すと墓石を送る", () => {
+      const item = stray("架空の牛乳")!;
+      const pending = store.pendingCountNow();
+      repo.deleteItem(item.id);
+      expect(itemOf(item.id)).toBeUndefined();
+      expect(store.pendingCountNow()).toBe(pending + 1);
+    });
+  });
+
   describe("forgetItemName", () => {
     const bought = (id: Id, listId: Id, name: string, checkedAt: string): LocalChange => ({
       action: "put",

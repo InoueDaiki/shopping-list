@@ -38,6 +38,9 @@ export function seedDemo({ store, repository, categories, newId, now }: SeedInpu
   item("にんじん", "野菜");
   item("食パン", "パン");
   repository.addItem(listId, "ふしぎな品物", { categoryId: null, categorySource: null });
+  // どのリストにも属さない品目(野良品目)。リスト一覧の「未整理」から移す
+  repository.addStrayItem("ハンドソープ", { categoryId: category("日用品"), categorySource: "history" });
+  repository.addStrayItem("ふしぎな置き物", { categoryId: null, categorySource: null });
   store.commitNow(
     PAST_ITEMS.map(([name, categoryName], index): LocalChange => {
       const row: HistoryEntry = {

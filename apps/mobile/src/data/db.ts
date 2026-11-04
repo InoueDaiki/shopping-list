@@ -74,6 +74,23 @@ const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    // items の list_id を空にできるようにする(野良品目)。SQLite は列の NOT NULL を外せないので作り直す。
+    // 行の順(rowid)は一覧の並びに使うので、そのまま写す
+    version: 5,
+    sql: `
+      CREATE TABLE items_next (
+        id TEXT PRIMARY KEY, list_id TEXT, name TEXT NOT NULL,
+        category_id TEXT, category_source TEXT, memo TEXT NOT NULL,
+        checked INTEGER NOT NULL, checked_at TEXT, checked_store_id TEXT, updated_at TEXT NOT NULL,
+        checked_updated_at TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO items_next (rowid, id, list_id, name, category_id, category_source, memo, checked, checked_at, checked_store_id, updated_at, checked_updated_at)
+        SELECT rowid, id, list_id, name, category_id, category_source, memo, checked, checked_at, checked_store_id, updated_at, checked_updated_at FROM items;
+      DROP TABLE items;
+      ALTER TABLE items_next RENAME TO items;
+    `,
+  },
 ];
 
 export function migrate(db: Database): void {

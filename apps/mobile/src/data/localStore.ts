@@ -101,7 +101,7 @@ const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
     ],
     decode: (row) => ({
       id: row.id as Id,
-      listId: row.list_id as Id,
+      listId: row.list_id as Id | null,
       name: row.name as string,
       categoryId: row.category_id as Id | null,
       categorySource: row.category_source as Item["categorySource"],

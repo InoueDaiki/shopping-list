@@ -1,0 +1,33 @@
+# リストに属さない品目(野良品目)を、リスト一覧の「未整理」からリストへ移す。
+# 野良品目を作る入口はまだ無いので、デモモードの初期データ(apps/mobile/src/data/demo.ts)の2つを使う
+appId: io.github.inouedaiki.shoppinglist
+---
+- launchApp:
+    clearState: true
+
+- tapOn: "未整理の品目 2件。リストへ移す"
+- assertVisible: 未整理
+- assertVisible: ハンドソープ
+- assertVisible: ふしぎな置き物
+
+# 払うと少しの間だけ取り消せる。払う起点は文字の中ほどで左に寄っているので、右へ払って距離を取る
+- swipe:
+    from: ふしぎな置き物
+    direction: RIGHT
+- assertVisible: 「ふしぎな置き物」を削除しました
+- tapOn: 元に戻す
+- assertVisible: ふしぎな置き物
+
+# 押してリストを選ぶと移り、そのリストを開ける
+- tapOn: "ハンドソープ。リストへ移す"
+- tapOn: ドラッグストア
+- assertVisible: 「ハンドソープ」をドラッグストアへ移しました
+- assertNotVisible: "ハンドソープ。リストへ移す"
+- tapOn: ドラッグストアを開く
+- assertVisible: ハンドソープ
+- assertVisible: 日用品
+
+# 一覧へ戻ると、残りの件数になる
+- back
+- back
+- assertVisible: "未整理の品目 1件。リストへ移す"

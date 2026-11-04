@@ -65,6 +65,12 @@ export function useListItems(listId: Id) {
   return useMemo(() => items.filter((item) => item.listId === listId), [items, listId]);
 }
 
+// どのリストにも属さない品目(野良品目)。リスト一覧の「未整理」に出す
+export function useStrayItems() {
+  const items = useTable("items");
+  return useMemo(() => items.filter((item) => item.listId === null), [items]);
+}
+
 // 忘れた品目名の分を除いた履歴(rememberedHistory と同じ)。候補とよく使う品目と品目の管理に使う
 export function useRememberedHistory() {
   const history = useTable("history");

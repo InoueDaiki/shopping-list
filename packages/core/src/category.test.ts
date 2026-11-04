@@ -25,6 +25,15 @@ describe("resolveCategory", () => {
     });
   });
 
+  it("リストの無い品目(野良品目)では、どの記録もほかのリストとして見る", async () => {
+    const items = [itemFixture({ id: "stray", listId: null, categoryId: "cat-fish", categorySource: "inferred" })];
+    const history = [historyFixture({ listId: "list-b", categoryId: "cat-meat" })];
+    expect(await resolveCategory({ ...base, listId: null, items, history })).toEqual({
+      categoryId: "cat-meat",
+      categorySource: "history",
+    });
+  });
+
   it("同じリストに無ければほかのリストから引く", async () => {
     const history = [historyFixture({ listId: "list-b", categoryId: "cat-meat" })];
     expect((await resolveCategory({ ...base, history })).categoryId).toBe("cat-meat");

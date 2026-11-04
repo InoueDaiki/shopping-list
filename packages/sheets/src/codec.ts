@@ -175,7 +175,8 @@ const stores: Codec<Store> = {
 const items: Codec<Item> = {
   decode: (r) => ({
     id: r.id("id"),
-    listId: r.id("list_id"),
+    // 空は野良品目(どのリストにも属さない)
+    listId: r.optionalId("list_id"),
     name: r.text("name"),
     categoryId: r.optionalId("category_id"),
     categorySource: r.categorySource("category_source"),

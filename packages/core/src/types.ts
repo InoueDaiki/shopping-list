@@ -36,7 +36,9 @@ export type CategorySource = "history" | "inferred" | "user";
 // 今リストにある品目
 export interface Item {
   id: Id;
-  listId: Id;
+  // 属するリスト。null はどのリストにも属さない品目(野良品目)。リストの画面には出さず、
+  // リスト一覧の「未整理」から選んだリストへ移す
+  listId: Id | null;
   name: string;
   // 未分類は null
   categoryId: Id | null;

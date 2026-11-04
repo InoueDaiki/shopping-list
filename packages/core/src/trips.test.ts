@@ -186,6 +186,8 @@ describe("checksFromItems", () => {
         checkedStoreId: "store-a",
       }),
       itemFixture({ id: "off", checked: false, checkedAt: at }),
+      // リストの無い品目はチェックできない。シートを手で直して入っても履歴へ移さない
+      itemFixture({ id: "stray", listId: null, checked: true, checkedAt: at, checkedStoreId: "store-a" }),
     ]);
     expect(checks).toEqual([
       { id: "on", storeId: "store-a", categoryId: "cat-a", checkedAt: at },

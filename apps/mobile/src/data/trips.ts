@@ -6,18 +6,20 @@ import {
   isTripFinished,
   TRIP_GAP_MS,
   type HistoryEntry,
+  type Id,
   type Iso,
   type Item,
   type LocalChange,
 } from "@shopping-list/core";
 
-// 店舗の無いチェックはトリップにならない。同じ時間が過ぎたら移す(学習には使われない)。
+// 店舗の無いチェックはトリップにならない。リストの無い品目(野良品目)はチェックできないので除く。同じ時間が過ぎたら移す(学習には使われない)。
 // ID は core と同じく品目の ID にして、2台が同時に移しても読むときに重なるようにする
 function storelessEntries(items: readonly Item[], now: Iso): HistoryEntry[] {
   const nowMs = Date.parse(now);
   return items
     .filter(
-      (item) =>
+      (item): item is Item & { listId: Id } =>
+        item.listId !== null &&
         item.checked &&
         item.checkedAt !== null &&
         item.checkedStoreId === null &&

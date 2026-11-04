@@ -39,8 +39,10 @@ function emptyApply(overrides: Partial<RemoteApply> = {}): RemoteApply {
 describe("migrate", () => {
   it("前の版の店舗に list_id を足し、行は null で残す", () => {
     const db = openTestDatabase();
+    new SqliteLocalStore(db);
     db.exec(`
-      CREATE TABLE stores (id TEXT PRIMARY KEY, name TEXT NOT NULL, lat REAL, lng REAL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      ALTER TABLE stores DROP COLUMN list_id;
+      DROP TABLE forgotten_items;
       INSERT INTO stores VALUES ('store-1', '架空の店', 1.5, 2.5, '2028-01-01T00:00:00.000Z', '2028-01-01T00:00:00.000Z');
       PRAGMA user_version = 2;
     `);
@@ -58,6 +60,32 @@ describe("migrate", () => {
     const row = { id: "forget-1", listId: "list-1", normalizedName: "ぎゅうにゅう", forgottenAt: "2028-01-02T00:00:00.000Z", updatedAt: "2028-01-02T00:00:00.000Z" };
     store.commitNow([{ action: "put", table: "forgottenItems", row }]);
     expect(store.rows("forgottenItems")).toEqual([row]);
+  });
+});
+
+describe("migrate の版 5", () => {
+  it("品目の list_id を空にできるようにし、前の行と並びを残す", () => {
+    const db = openTestDatabase();
+    new SqliteLocalStore(db);
+    db.exec(`
+      DROP TABLE items;
+      CREATE TABLE items (
+        id TEXT PRIMARY KEY, list_id TEXT NOT NULL, name TEXT NOT NULL,
+        category_id TEXT, category_source TEXT, memo TEXT NOT NULL,
+        checked INTEGER NOT NULL, checked_at TEXT, checked_store_id TEXT, updated_at TEXT NOT NULL,
+        checked_updated_at TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO items VALUES ('item-b', 'list-1', '架空の品物B', NULL, NULL, 'メモ', 1, '${AT}', 'store-1', '${AT}', '${AT}');
+      INSERT INTO items VALUES ('item-a', 'list-1', '架空の品物A', NULL, NULL, '', 0, NULL, NULL, '${AT}', '${AT}');
+      PRAGMA user_version = 4;
+    `);
+    const store = new SqliteLocalStore(db, { recordPending: false });
+    expect(store.rows("items").map((row) => [row.id, row.listId, row.checked, row.memo])).toEqual([
+      ["item-b", "list-1", true, "メモ"],
+      ["item-a", "list-1", false, ""],
+    ]);
+    store.commitNow([put(item({ id: "stray", listId: null }))]);
+    expect(store.rows("items").at(-1)).toEqual(item({ id: "stray", listId: null }));
   });
 });
 

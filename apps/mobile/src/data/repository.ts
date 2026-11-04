@@ -1,7 +1,9 @@
 // 画面からの書き込み。すべて同期で SQLite に入れ、送信は同期が裏で行う
 import {
+  lookupCategory,
   normalizeItemName,
   storesForList,
+  withoutForgotten,
   type Category,
   type CategoryResolution,
   type ForgottenItem,
@@ -89,13 +91,23 @@ export class Repository {
 
   // 同じ名前がまだ買っていない状態でリストにあれば足さず、null を返す
   addItem(listId: Id, name: string, category: CategoryResolution): Item | null {
+    return this.#addItem(listId, name, category);
+  }
+
+  // どのリストにも属さない品目(野良品目)を足す。リスト一覧の「未整理」から、あとでリストへ移す。
+  // 同じ名前の野良品目があれば足さず、null を返す
+  addStrayItem(name: string, category: CategoryResolution): Item | null {
+    return this.#addItem(null, name, category);
+  }
+
+  #openItemNamed(listId: Id | null, key: string): Item | undefined {
+    return this.#store.rows("items").find((item) => item.listId === listId && !item.checked && normalizeItemName(item.name) === key);
+  }
+
+  #addItem(listId: Id | null, name: string, category: CategoryResolution): Item | null {
     const trimmed = name.trim();
     const key = normalizeItemName(trimmed);
-    if (key === "") return null;
-    const exists = this.#store
-      .rows("items")
-      .some((item) => item.listId === listId && !item.checked && normalizeItemName(item.name) === key);
-    if (exists) return null;
+    if (key === "" || this.#openItemNamed(listId, key)) return null;
     const at = this.#now();
     const item: Item = {
       id: this.#newId(),
@@ -136,6 +148,33 @@ export class Repository {
     this.#store.commitNow([{ action: "delete", table: "items", id, at: this.#now() }]);
   }
 
+  // 野良品目をリストへ移し、移した先の品目を返す。移す先に同じ名前の買っていない品目があれば、
+  // 野良品目を消してそちらを返す(同じリストに同じ品目を2つ置かない)。利用者が決めたカテゴリでなければ、
+  // 移す先のリストの記録で引き直す(同じリストの記録がいちばん強い)。野良品目でない、リストが無いときは null
+  moveStrayItem(id: Id, listId: Id): Item | null {
+    const item = this.#item(id);
+    if (!item || item.listId !== null || !this.#store.rows("lists").some((list) => list.id === listId)) return null;
+    const at = this.#now();
+    const existing = this.#openItemNamed(listId, normalizeItemName(item.name));
+    if (existing) {
+      this.#store.commitNow([{ action: "delete", table: "items", id, at }]);
+      return existing;
+    }
+    const resolved =
+      item.categorySource === "user"
+        ? null
+        : lookupCategory({
+            name: item.name,
+            listId,
+            categories: this.#store.rows("categories"),
+            items: this.#store.rows("items").filter((row) => row.id !== id),
+            history: withoutForgotten(this.#store.rows("history"), this.#store.rows("forgottenItems")),
+          });
+    const moved: Item = { ...item, ...(resolved?.categoryId ? resolved : {}), listId, updatedAt: at };
+    this.#store.commitNow([{ action: "put", table: "items", row: moved }]);
+    return moved;
+  }
+
   // 品目名を忘れる。そのリストで、今までに買った同じ名前(正規化して同じ)の履歴を、候補、よく使う品目、
   // カテゴリの引き当て、推定の学習に使わなくなる。履歴は消さない。同じ名前の記録があれば時刻を進めて使い回す
   forgetItemName(listId: Id, name: string): void {
@@ -159,14 +198,16 @@ export class Repository {
   }
 
   // チェックする。トリップの最初のチェックなら true を返す(画面が店舗を聞く)
+  // 野良品目はどのリストの買い物でもないのでチェックしない
   checkItem(id: Id): boolean {
     const item = this.#item(id);
-    if (!item || item.checked) return false;
+    if (!item || item.checked || item.listId === null) return false;
+    const { listId } = item;
     const now = this.#now();
-    const current = this.currentSession(item.listId);
+    const current = this.currentSession(listId);
     // 向きの切り替えだけで始まった買い物は、まだ店舗を聞いていない。スキップの後は聞き直さない
     const first = current === null || (current.storeId === null && !this.#hasChecks(current));
-    const session = { ...(current ?? startSession(item.listId, now)), touchedAt: now };
+    const session = { ...(current ?? startSession(listId, now)), touchedAt: now };
     const checked: Item = { ...item, checked: true, checkedAt: now, checkedStoreId: session.storeId, checkedUpdatedAt: now };
     this.#store.commitNow([{ action: "put", table: "items", row: checked }]);
     this.#saveSession(reviewDirection(session, this.#learnedOrder(session.storeId), this.#store.rows("items")));
@@ -244,14 +285,14 @@ export class Repository {
     return changes.length / 2;
   }
 
-  // リストの無い品目を墓石にする。リストを消す前にほかの端末が足した分は、消した端末からは
-  // 見えないので、同期のたびに片付ける。消した品目の数を返す
+  // 消えたリストの品目を墓石にする。リストを消す前にほかの端末が足した分は、消した端末からは
+  // 見えないので、同期のたびに片付ける。野良品目(listId が null)は残す。消した品目の数を返す
   removeOrphanItems(): number {
     const lists = new Set(this.#store.rows("lists").map((list) => list.id));
     const at = this.#now();
     const changes = this.#store
       .rows("items")
-      .filter((item) => !lists.has(item.listId))
+      .filter((item) => item.listId !== null && !lists.has(item.listId))
       .map((item): LocalChange => ({ action: "delete", table: "items", id: item.id, at }));
     this.#store.commitNow(changes);
     return changes.length;
@@ -292,8 +333,8 @@ export class Repository {
     if (unassigned.length === 0) return 0;
     const lists = new Set(this.#store.rows("lists").map((list) => list.id));
     const lastUsed = new Map<Id, { listId: Id; at: number }>();
-    const note = (storeId: Id | null, listId: Id, checkedAt: Iso | null) => {
-      if (storeId === null || checkedAt === null || !lists.has(listId)) return;
+    const note = (storeId: Id | null, listId: Id | null, checkedAt: Iso | null) => {
+      if (storeId === null || checkedAt === null || listId === null || !lists.has(listId)) return;
       const at = Date.parse(checkedAt);
       if (at > (lastUsed.get(storeId)?.at ?? -Infinity)) lastUsed.set(storeId, { listId, at });
     };

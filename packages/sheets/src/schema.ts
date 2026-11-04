@@ -2,7 +2,7 @@
 
 import type { SyncTable } from "@shopping-list/core";
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const ID_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
 export const ID_LIST_PATTERN = "^([A-Za-z0-9_-]{1,64}(,[A-Za-z0-9_-]{1,64})*)?$";
@@ -109,6 +109,7 @@ export const SHEETS: readonly SheetDef[] = [
     rowCount: 2000,
     columns: [
       id("id"),
+      // 空はどのリストにも属さない品目(野良品目)。版 7 から空を許す(プルダウンの入力規則は空のセルを検査しない)
       ref("list_id", "Lists"),
       text("name"),
       ref("category_id", "Categories"),
@@ -229,6 +230,9 @@ export const UPGRADES: readonly Upgrade[] = [
   { from: 3, columns: { Stores: ["list_id"] }, sheets: [] },
   { from: 4, columns: { Meta: ["last_write"] }, sheets: ["Presence"] },
   { from: 5, columns: {}, sheets: ["ForgottenItems"] },
+  // Items の list_id を空にできるようにした(野良品目)。列もシートも足さず、版だけを上げる。
+  // 前の版のアプリは空の list_id を読めないので、版を合わせて同期を止めさせる
+  { from: 6, columns: {}, sheets: [] },
 ];
 
 // version から今の版までに足したもの。上げられない版なら null

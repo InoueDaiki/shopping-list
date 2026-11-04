@@ -1,7 +1,9 @@
 import type { ShoppingList } from "@shopping-list/core";
 import { ActionSheet, Badge, Button, ConfirmDialog, cx, Icon, PageHeader, Text } from "@shopping-list/ui-native";
 import { router } from "expo-router";
+import ChevronRight from "lucide-react-native/icons/chevron-right";
 import EllipsisVertical from "lucide-react-native/icons/ellipsis-vertical";
+import Inbox from "lucide-react-native/icons/inbox";
 import Plus from "lucide-react-native/icons/plus";
 import Settings from "lucide-react-native/icons/settings";
 import { useMemo, useState } from "react";
@@ -10,13 +12,14 @@ import { Pressable, ScrollView, View } from "react-native";
 import { NamePrompt } from "../../components/NamePrompt.tsx";
 import { NearbyShopping } from "../../components/NearbyShopping.tsx";
 import { SyncNoticeBar } from "../../components/SyncNoticeBar.tsx";
-import { useTable } from "../../data/hooks.ts";
+import { useStrayItems, useTable } from "../../data/hooks.ts";
 import { repository } from "../../data/runtime.ts";
 
 // リストの一覧
 export default function Lists() {
   const lists = useTable("lists");
   const items = useTable("items");
+  const strays = useStrayItems();
   const [adding, setAdding] = useState(false);
   const [target, setTarget] = useState<ShoppingList | null>(null);
   const [renaming, setRenaming] = useState<ShoppingList | null>(null);
@@ -25,7 +28,7 @@ export default function Lists() {
   const remaining = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of items) {
-      if (!item.checked) counts.set(item.listId, (counts.get(item.listId) ?? 0) + 1);
+      if (!item.checked && item.listId !== null) counts.set(item.listId, (counts.get(item.listId) ?? 0) + 1);
     }
     return counts;
   }, [items]);
@@ -71,6 +74,22 @@ export default function Lists() {
               </View>
             ))}
           </View>
+        )}
+        {strays.length > 0 && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`未整理の品目 ${strays.length}件。リストへ移す`}
+            onPress={() => router.push("/stray")}
+            className="min-h-16 flex-row items-center gap-3 rounded-lg border border-border bg-surface px-5 active:bg-surface-muted"
+          >
+            <Icon icon={Inbox} size={20} color="fg-muted" />
+            <Text className="min-w-0 shrink font-medium">未整理</Text>
+            <View>
+              <Badge tone="accent">{strays.length}</Badge>
+            </View>
+            <View className="flex-1" />
+            <Icon icon={ChevronRight} size={20} color="fg-muted" />
+          </Pressable>
         )}
       </ScrollView>
       <View className="px-4 pt-2 pb-safe-or-4">

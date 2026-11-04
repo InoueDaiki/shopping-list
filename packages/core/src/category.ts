@@ -15,7 +15,8 @@ export interface CategoryResolution {
 
 export interface CategoryLookupInput {
   name: string;
-  listId: Id;
+  // null はどのリストにも属さない品目(野良品目)。どの記録も「ほかのリスト」として見る
+  listId: Id | null;
   categories: readonly Category[];
   items: readonly Item[];
   history: readonly HistoryEntry[];
@@ -73,7 +74,7 @@ export function lookupCategory(input: CategoryLookupInput): CategoryResolution {
     const candidate: CategoryRecord = {
       id: record.id,
       categoryId: record.categoryId,
-      sameList: record.listId === input.listId,
+      sameList: input.listId !== null && record.listId === input.listId,
       strength: SOURCE_STRENGTH[record.source ?? "none"],
       at: Date.parse(record.at),
     };

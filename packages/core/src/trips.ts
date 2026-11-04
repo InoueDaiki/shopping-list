@@ -18,11 +18,11 @@ export interface Trip<T extends CheckRecord = CheckRecord> {
   checks: T[];
 }
 
-// チェック済みの品目をチェックの記録にする。チェックを外したものはここで落ちる
+// チェック済みの品目をチェックの記録にする。チェックを外したものと、リストの無い品目はここで落ちる
 export function checksFromItems(items: readonly Item[]): CheckRecord[] {
   const checks: CheckRecord[] = [];
   for (const item of items) {
-    if (!item.checked || item.checkedAt === null) continue;
+    if (!item.checked || item.checkedAt === null || item.listId === null) continue;
     checks.push({
       id: item.id,
       storeId: item.checkedStoreId,
@@ -78,13 +78,14 @@ export function tripIdOf(trip: Trip): Id {
 }
 
 // 終わったトリップの品目を履歴の行にする。履歴の ID は品目の ID にするので、2台が同じ
-// トリップを移しても重ならない(読むときに ID で重ねる)。items に無いチェックは除く
+// トリップを移しても重ならない(読むときに ID で重ねる)。items に無いチェックと、
+// リストの無い品目(野良品目。チェックできないが、シートを手で直すとありうる)は除く
 export function historyEntriesFromTrip(trip: Trip, items: readonly Item[]): HistoryEntry[] {
   const itemsById = new Map(items.map((item) => [item.id, item]));
   const tripId = tripIdOf(trip);
   return trip.checks.flatMap((check, checkedSeq) => {
     const item = itemsById.get(check.id);
-    if (item === undefined) return [];
+    if (item === undefined || item.listId === null) return [];
     return [
       {
         id: item.id,
