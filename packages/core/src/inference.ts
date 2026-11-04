@@ -10,6 +10,7 @@ import {
   INFERENCE_NGRAM_SIZES,
   INFERENCE_SMOOTHING,
 } from "./constants.ts";
+import { INFERENCE_DICTIONARY_EXTRA } from "./inference-dictionary-extra.ts";
 import { INFERENCE_DICTIONARY } from "./inference-dictionary.ts";
 import { normalizeItemName } from "./normalize.ts";
 import type { Category, CategorySource, HistoryEntry, Id } from "./types.ts";
@@ -107,17 +108,38 @@ function classify(model: CategoryModel, normalizedName: string, categories: read
   return isConfident ? best.id : null;
 }
 
-let dictionaryIndex: Map<string, string> | null = null;
+interface DictionaryIndex {
+  // 正規化した語から、正規化したカテゴリの名前を引く
+  words: Map<string, string>;
+  // いちばん長い語の文字数。これより長い切れ端は引かない
+  longest: number;
+}
 
-// 正規化した語からカテゴリの名前を引く表。起動を重くしないよう、最初の推定のときに作る
-function dictionary(): Map<string, string> {
+let dictionaryIndex: DictionaryIndex | null = null;
+
+// 語からカテゴリの名前を引く表。起動を重くしないよう、最初の推定か prepareCategoryInference の
+// ときに作る。生成した語は正規化済みなのでそのまま入れ、手の辞書の語は後から入れて優先する
+function dictionary(): DictionaryIndex {
   if (dictionaryIndex === null) {
-    dictionaryIndex = new Map();
-    for (const [categoryName, words] of Object.entries(INFERENCE_DICTIONARY)) {
-      for (const word of words) dictionaryIndex.set(normalizeItemName(word), normalizeItemName(categoryName));
+    const words = new Map<string, string>();
+    for (const [categoryName, list] of Object.entries(INFERENCE_DICTIONARY_EXTRA)) {
+      const category = normalizeItemName(categoryName);
+      for (const word of list.split("\n")) if (word !== "") words.set(word, category);
     }
+    for (const [categoryName, list] of Object.entries(INFERENCE_DICTIONARY)) {
+      const category = normalizeItemName(categoryName);
+      for (const word of list) words.set(normalizeItemName(word), category);
+    }
+    let longest = 0;
+    for (const word of words.keys()) longest = Math.max(longest, word.length);
+    dictionaryIndex = { words, longest };
   }
   return dictionaryIndex;
+}
+
+// 推定の前に辞書の表を作っておく。5万語あるので、品目を足した瞬間に作ると一瞬止まる
+export function prepareCategoryInference(): void {
+  dictionary();
 }
 
 // 短い語は別の語の中に偶然現れるので、部分一致では使わない(「もも」と「鶏もも」、「酒」と
@@ -133,9 +155,9 @@ function canMatchAtEnd(word: string): boolean {
   return word === "ぱん" || word.length >= INFERENCE_MIN_PARTIAL_LENGTH || /[一-鿿]/.test(word);
 }
 
-// 語尾の数量と量の指定を除く(「卵10個」「牛乳 1l」「キャベツ1/2」「大根 半分」)
+// 語尾の数量と量の指定を除く(「卵10個」「牛乳 1l」「キャベツ1/2」「大根 半分」「あじ4尾」「水2l×6本」)
 const QUANTITY_SUFFIX =
-  /\s*(?:\d+(?:[./]\d+)?\s*(?:個|こ|本|枚|袋|ぱっく|p|缶|玉|丁|切れ|切|束|箱|ろーる|kg|g|l|ml|cc)?(?:入り?)?|半分|半玉|少々|小袋|大袋|徳用)$/;
+  /\s*[×x*]?\s*(?:\d+(?:[./]\d+)?\s*(?:個|こ|本|枚|袋|ぱっく|p|缶|玉|丁|切れ|切|束|箱|ろーる|尾|匹|杯|連|房|斤|けーす|せっと|kg|g|l|ml|cc)?(?:入り?)?|半分|半玉|少々|小袋|大袋|徳用)$/;
 
 // 「水2l 6本」のように重なることがあるので、変わらなくなるまで除く
 function withoutQuantity(normalizedName: string): string {
@@ -143,15 +165,28 @@ function withoutQuantity(normalizedName: string): string {
   return name === normalizedName ? name : withoutQuantity(name);
 }
 
-// 完全一致、語尾の最長の語、どこかの最長の語の順に見る。同じ長さなら後ろの語を取る。
-// マスタに名前の無いカテゴリの語は無かったものとして扱う
-function lookUpDictionary(normalizedName: string, categories: readonly Category[]): Id | null {
-  const words = dictionary();
-  const available = new Map<string, Id>();
-  for (const category of categories) {
-    const key = normalizeItemName(category.name);
-    if (!available.has(key)) available.set(key, category.id);
+const availableCache = new WeakMap<readonly Category[], Map<string, Id>>();
+
+// 正規化したカテゴリの名前から ID を引く表。同じマスタの配列なら作り直さない
+function availableCategories(categories: readonly Category[]): Map<string, Id> {
+  let available = availableCache.get(categories);
+  if (!available) {
+    available = new Map();
+    for (const category of categories) {
+      const key = normalizeItemName(category.name);
+      if (!available.has(key)) available.set(key, category.id);
+    }
+    availableCache.set(categories, available);
   }
+  return available;
+}
+
+// 完全一致、語尾の最長の語、どこかの最長の語の順に見る。同じ長さなら後ろの語を取る。
+// マスタに名前の無いカテゴリの語は無かったものとして扱う。切れ端は1つずつ表で引くので、
+// かかる時間は辞書の語の数ではなく品目名の長さで決まる
+function lookUpDictionary(normalizedName: string, categories: readonly Category[]): Id | null {
+  const { words, longest } = dictionary();
+  const available = availableCategories(categories);
   const categoryOf = (word: string) => available.get(words.get(word) ?? "") ?? null;
 
   const exact = categoryOf(normalizedName);
@@ -159,12 +194,12 @@ function lookUpDictionary(normalizedName: string, categories: readonly Category[
   const name = withoutQuantity(normalizedName);
   const bare = categoryOf(name);
   if (bare !== null) return bare;
-  for (let start = 1; start < name.length; start++) {
+  for (let start = Math.max(1, name.length - longest); start < name.length; start++) {
     const word = name.slice(start);
     const category = canMatchAtEnd(word) ? categoryOf(word) : null;
     if (category !== null) return category;
   }
-  for (let length = name.length - 1; length >= 1; length--) {
+  for (let length = Math.min(name.length - 1, longest); length >= 1; length--) {
     for (let start = name.length - length; start >= 0; start--) {
       const word = name.slice(start, start + length);
       const category = canMatchPartially(word) ? categoryOf(word) : null;

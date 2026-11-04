@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { lookupCategory, resolveCategory } from "./category.ts";
+import { INFERENCE_DICTIONARY_EXTRA } from "./inference-dictionary-extra.ts";
 import { INFERENCE_DICTIONARY } from "./inference-dictionary.ts";
 import { INFERENCE_EVAL_DATA } from "./inference-eval-data.ts";
 import { createCategoryInferrer } from "./inference.ts";
@@ -39,6 +40,31 @@ describe("組み込みの語彙の辞書", () => {
   it("正規化しても同じ語が重ならない", () => {
     const keys = words.map(normalizeItemName);
     expect(keys.filter((key, index) => keys.indexOf(key) !== index)).toEqual([]);
+  });
+
+  describe("生成した語彙", () => {
+    const extra = Object.entries(INFERENCE_DICTIONARY_EXTRA).flatMap(([name, list]) =>
+      list.split("\n").filter((word) => word !== "").map((word) => [word, name] as const),
+    );
+
+    it("カテゴリは手の辞書と同じ", () => {
+      expect(Object.keys(INFERENCE_DICTIONARY_EXTRA)).toEqual(Object.keys(INFERENCE_DICTIONARY));
+    });
+
+    it("語は6万までに抑える", () => {
+      expect(extra.length).toBeLessThanOrEqual(60_000);
+    });
+
+    it("正規化した形で持ち、手の辞書とも、ほかのカテゴリとも重ならない", () => {
+      const curated = new Set(words.map(normalizeItemName));
+      const seen = new Set<string>();
+      const problems = extra.filter(([word]) => {
+        const bad = word !== normalizeItemName(word) || curated.has(word) || seen.has(word);
+        seen.add(word);
+        return bad;
+      });
+      expect(problems).toEqual([]);
+    });
   });
 
   it.each([
@@ -96,6 +122,8 @@ describe("組み込みの語彙の辞書", () => {
     ["牛乳 1L", "乳製品"],
     ["キャベツ1/2", "野菜"],
     ["大根 半分", "野菜"],
+    ["あじ4尾", "鮮魚"],
+    ["水2L×6本", "飲料"],
   ])("語尾と数量を見る: %s", async (name, expected) => {
     expect(await dictionaryOnly.infer(name, master)).toBe(idOf(expected));
   });

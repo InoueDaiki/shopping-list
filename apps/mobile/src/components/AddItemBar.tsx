@@ -4,7 +4,7 @@ import { type ComponentRef, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { Keyboard, Pressable, ScrollView, type TextInput, View } from "react-native";
 
 import { useListItems, useRememberedHistory } from "../data/hooks.ts";
-import { inferItemCategory } from "../data/inference.ts";
+import { inferItemCategory, prepareItemInference } from "../data/inference.ts";
 import { localStore, rememberedHistory, repository } from "../data/runtime.ts";
 import { openItemNamed } from "../logic/listRows.ts";
 
@@ -129,7 +129,10 @@ export function AddItemBar({ listId, onShowItem }: AddItemBarProps) {
             setName(text);
             setNotice(null);
           }}
-          onFocus={() => setFocused(true)}
+          onFocus={() => {
+            setFocused(true);
+            prepareItemInference();
+          }}
           onBlur={() => {
             setFocused(false);
             setNotice(null);

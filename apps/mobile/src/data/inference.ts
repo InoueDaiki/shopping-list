@@ -1,5 +1,5 @@
 // 品目のカテゴリの推定を裏で走らせる。結果が出たら品目へ入れ、失敗したら未分類のままにする
-import { createCategoryInferrer, resolveCategory, type Item } from "@shopping-list/core";
+import { createCategoryInferrer, prepareCategoryInference, resolveCategory, type Item } from "@shopping-list/core";
 
 import { localStore, rememberedHistory, repository } from "./runtime.ts";
 
@@ -24,4 +24,15 @@ async function inferAndApply(item: Item): Promise<void> {
 export function inferItemCategory(item: Item): void {
   if (item.categoryId !== null) return;
   inferAndApply(item).catch(() => undefined);
+}
+
+// 入力欄に触れたら、キーボードが出終わるのを待って辞書の表を作っておく。打ち終わるまでに済み、
+// 足した瞬間に止まらない
+const PREPARE_DELAY_MS = 400;
+let prepared = false;
+
+export function prepareItemInference(): void {
+  if (prepared) return;
+  prepared = true;
+  setTimeout(prepareCategoryInference, PREPARE_DELAY_MS);
 }
