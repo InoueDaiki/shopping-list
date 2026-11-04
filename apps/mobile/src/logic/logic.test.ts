@@ -252,6 +252,8 @@ describe("redirectSystemPath", () => {
 
   it("ほかのパスはそのまま", () => {
     expect(redirectSystemPath({ path: "/lists/oauth2redirect", initial: false })).toBe("/lists/oauth2redirect");
+    // ウィジェットとショートカットの品目の追加
+    expect(redirectSystemPath({ path: "shoppinglist://quick-add", initial: true })).toBe("shoppinglist://quick-add");
   });
 });
 
