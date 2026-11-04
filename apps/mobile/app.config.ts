@@ -56,6 +56,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     "./plugins/with-release-signing.js",
+    // ホーム画面のウィジェットとショートカットの「品目を追加」(docs/設計メモ.md の「ホーム画面のウィジェット」)
+    [
+      "./plugins/with-quick-add.js",
+      {
+        light: { primary: colors.light.primary, onPrimary: colors.light["on-primary"] },
+        dark: { primary: colors.dark.primary, onPrimary: colors.dark["on-primary"] },
+      },
+    ],
   ],
   extra: {
     googleOAuthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID ?? "",
