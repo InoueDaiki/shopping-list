@@ -27,7 +27,7 @@ export function itemRowIndex(rows: readonly ListRow[], id: Id): number {
 }
 
 // 重ねて足せなかったときの、すでにある品目。リポジトリの判定と同じく、チェック済みは見ない
-export function openItemNamed(items: readonly Item[], listId: Id, name: string): Item | undefined {
+export function openItemNamed(items: readonly Item[], listId: Id | null, name: string): Item | undefined {
   const key = normalizeItemName(name);
   return items.find((item) => item.listId === listId && !item.checked && normalizeItemName(item.name) === key);
 }

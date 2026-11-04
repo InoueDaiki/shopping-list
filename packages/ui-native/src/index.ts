@@ -13,5 +13,5 @@ export { type Foreground, ForegroundProvider, useForeground, useTokenColor } fro
 export { FullScreenMessage } from "./FullScreenMessage.tsx";
 export { Icon, type IconProps } from "./Icon.tsx";
 export { PageHeader } from "./PageHeader.tsx";
-export { Sheet, type SheetProps } from "./Sheet.tsx";
+export { Sheet, SheetPanel, type SheetPanelProps, type SheetProps } from "./Sheet.tsx";
 export { Text, type TextProps, wrapText } from "./Text.tsx";

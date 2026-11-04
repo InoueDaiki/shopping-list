@@ -17,29 +17,39 @@ export interface SheetProps {
   children: ReactNode;
 }
 
+export type SheetPanelProps = Omit<SheetProps, "open">;
+
 // 画面の下から出す面(品目のメモ、カテゴリの編集など)。中身が長ければスクロールする。
 // 入力欄を置いてもキーボードに隠れないよう、面ごと持ち上げる
-export function Sheet({ open, title, onClose, footer, children }: SheetProps) {
+export function Sheet({ open, onClose, ...panel }: SheetProps) {
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      {/* 幕は中身の後ろの別の要素にする(中身を包むと、読み上げで中のボタンを選べなくなる) */}
-      <KeyboardAvoidingView behavior="padding" className="flex-1 justify-end bg-overlay">
-        <Pressable accessibilityLabel="閉じる" className="absolute inset-0" onPress={onClose} />
-        <View accessibilityViewIsModal className="max-h-[85%] w-full rounded-t-xl bg-surface pb-safe-or-4">
-          <View className="flex-row items-center gap-2 border-b border-border py-2 pr-2 pl-4">
-            <Text accessibilityRole="header" className="min-w-0 flex-1 font-bold">
-              {title}
-            </Text>
-            <Button icon variant="ghost" accessibilityLabel="閉じる" onPress={onClose}>
-              <Icon icon={X} size={20} />
-            </Button>
-          </View>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-3 p-4">
-            {children}
-          </ScrollView>
-          {footer && <View className="gap-2 px-4 pt-2">{footer}</View>}
-        </View>
-      </KeyboardAvoidingView>
+      <SheetPanel onClose={onClose} {...panel} />
     </Modal>
+  );
+}
+
+// Sheet の中身。透明に重ねる画面(Expo Router の transparentModal)では、Modal を使わずにこれを直に置く。
+// Modal は別の窓になり、Android では開いてすぐの入力欄へのフォーカスでキーボードが出ない
+export function SheetPanel({ title, onClose, footer, children }: SheetPanelProps) {
+  return (
+    // 幕は中身の後ろの別の要素にする(中身を包むと、読み上げで中のボタンを選べなくなる)
+    <KeyboardAvoidingView behavior="padding" className="flex-1 justify-end bg-overlay">
+      <Pressable accessibilityLabel="閉じる" className="absolute inset-0" onPress={onClose} />
+      <View accessibilityViewIsModal className="max-h-[85%] w-full rounded-t-xl bg-surface pb-safe-or-4">
+        <View className="flex-row items-center gap-2 border-b border-border py-2 pr-2 pl-4">
+          <Text accessibilityRole="header" className="min-w-0 flex-1 font-bold">
+            {title}
+          </Text>
+          <Button icon variant="ghost" accessibilityLabel="閉じる" onPress={onClose}>
+            <Icon icon={X} size={20} />
+          </Button>
+        </View>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-3 p-4">
+          {children}
+        </ScrollView>
+        {footer && <View className="gap-2 px-4 pt-2">{footer}</View>}
+      </View>
+    </KeyboardAvoidingView>
   );
 }

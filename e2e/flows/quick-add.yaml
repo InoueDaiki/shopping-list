@@ -1,0 +1,32 @@
+# ウィジェットとショートカットから開く品目の追加(shoppinglist://quick-add)。
+# 候補を選べばそのリストへ、そのまま追加すれば未整理に入り、リストを選んで移せる
+appId: io.github.inouedaiki.shoppinglist
+---
+- launchApp:
+    clearState: true
+- assertVisible: 未整理の品目 2件。リストへ移す
+
+# 候補はリストごとに出る。選ぶとそのリストに入る
+- openLink: shoppinglist://quick-add
+- assertVisible: 品目を追加
+- inputText: バナ
+- tapOn: バナナをスーパーに追加
+- assertVisible: 「バナナ」をスーパーに追加しました
+- tapOn: スーパーを開く
+- assertVisible: バナナ
+
+# 候補を選ばずに追加すると未整理に入る。リストを選ぶと移って、そのリストが開く
+- openLink: shoppinglist://quick-add
+- inputText: ふしぎな箱
+# 下の画面にも「追加」があるので、読み上げの名前で押す
+- tapOn: 未整理に追加
+- assertVisible: 「ふしぎな箱」を未整理に追加しました
+- tapOn: リストを選ぶ
+- tapOn: ドラッグストア
+- assertVisible: ふしぎな箱
+
+# 戻ると、追加の画面を開く前の画面(スーパー)、次に一覧に出る。移したので未整理の件数は変わらない
+- back
+- assertVisible: バナナ
+- back
+- assertVisible: 未整理の品目 2件。リストへ移す

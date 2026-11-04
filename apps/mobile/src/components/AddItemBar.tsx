@@ -1,11 +1,12 @@
-import { frequentItems, itemSuggestions, lookupCategory, type Id } from "@shopping-list/core";
+import { frequentItems, itemSuggestions, type Id } from "@shopping-list/core";
 import { Button, Chip, cx, Input, Text } from "@shopping-list/ui-native";
 import { type ComponentRef, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Keyboard, Pressable, ScrollView, type TextInput, View } from "react-native";
 
 import { useListItems, useRememberedHistory } from "../data/hooks.ts";
-import { inferItemCategory, prepareItemInference } from "../data/inference.ts";
-import { localStore, rememberedHistory, repository } from "../data/runtime.ts";
+import { addListItem } from "../data/addItem.ts";
+import { prepareItemInference } from "../data/inference.ts";
+import { localStore } from "../data/runtime.ts";
 import { openItemNamed } from "../logic/listRows.ts";
 
 // 候補の行数の上限。キーボードと合わせて、リストを隠し切らない高さに抑える
@@ -94,15 +95,7 @@ export function AddItemBar({ listId, onShowItem }: AddItemBarProps) {
 
   const add = (itemName: string) => {
     if (itemName.trim() === "") return;
-    const category = lookupCategory({
-      name: itemName,
-      listId,
-      categories: localStore.rows("categories"),
-      items: localStore.rows("items"),
-      history: rememberedHistory(),
-    });
-    const item = repository.addItem(listId, itemName, category);
-    if (item?.categoryId === null) inferItemCategory(item);
+    const item = addListItem(listId, itemName);
     const shown = item ?? openItemNamed(localStore.rows("items"), listId, itemName);
     setName("");
     setNotice(item ? null : "すでにリストにあります");
