@@ -7,7 +7,7 @@ import { FlatList, View } from "react-native";
 import { SwipeToDelete } from "../../../../components/SwipeToDelete.tsx";
 import { UndoNotice } from "../../../../components/UndoNotice.tsx";
 import { usePendingDelete } from "../../../../components/usePendingDelete.ts";
-import { useRememberedHistory, useTable } from "../../../../data/hooks.ts";
+import { useListCategories, useRememberedHistory, useTable } from "../../../../data/hooks.ts";
 import { repository } from "../../../../data/runtime.ts";
 import { categoryToneMap } from "../../../../logic/categoryTone.ts";
 
@@ -23,7 +23,7 @@ function shortDate(iso: string): string {
 export default function RegisteredItems() {
   const { listId } = useLocalSearchParams<{ listId: Id }>();
   const lists = useTable("lists");
-  const categories = useTable("categories");
+  const categories = useListCategories(listId);
   const history = useRememberedHistory();
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query);

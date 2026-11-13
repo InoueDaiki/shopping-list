@@ -59,6 +59,7 @@ describe("migrate", () => {
     dropDest(db);
     db.exec(`
       ALTER TABLE stores DROP COLUMN list_id;
+      ALTER TABLE categories DROP COLUMN list_id;
       DROP TABLE forgotten_items;
       INSERT INTO stores VALUES ('store-1', '架空の店', 1.5, 2.5, '2028-01-01T00:00:00.000Z', '2028-01-01T00:00:00.000Z');
       PRAGMA user_version = 2;
@@ -71,6 +72,7 @@ describe("migrate", () => {
     const db = openTestDatabase();
     new SqliteLocalStore(db);
     db.exec("DROP TABLE forgotten_items");
+    db.exec("ALTER TABLE categories DROP COLUMN list_id");
     dropDest(db);
     db.exec("PRAGMA user_version = 3");
     const store = new SqliteLocalStore(db);
@@ -86,6 +88,7 @@ describe("migrate の版 5", () => {
     const db = openTestDatabase();
     new SqliteLocalStore(db);
     db.exec(`
+      ALTER TABLE categories DROP COLUMN list_id;
       DROP TABLE items;
       CREATE TABLE items (
         id TEXT PRIMARY KEY, list_id TEXT NOT NULL, name TEXT NOT NULL,
@@ -105,6 +108,31 @@ describe("migrate の版 5", () => {
     ]);
     store.commitNow([put(item({ id: "stray", listId: null }))]);
     expect(store.rows("items").at(-1)).toEqual(item({ id: "stray", listId: null }));
+  });
+});
+
+describe("migrate の版 7", () => {
+  it("カテゴリに list_id を足し、前の行は共通のカテゴリ(null)として読む", () => {
+    const db = openTestDatabase();
+    new SqliteLocalStore(db);
+    dropDest(db);
+    db.exec(`
+      ALTER TABLE categories DROP COLUMN list_id;
+      INSERT INTO categories VALUES ('cat-b', '架空の売り場B', 2, '${AT}');
+      INSERT INTO categories VALUES ('cat-a', '架空の売り場A', 1, '${AT}');
+      PRAGMA user_version = 5;
+    `);
+    const store = new SqliteLocalStore(db, { recordPending: false });
+    expect(store.rows("categories")).toEqual([
+      { id: "cat-a", name: "架空の売り場A", sort: 1, updatedAt: AT, listId: null },
+      { id: "cat-b", name: "架空の売り場B", sort: 2, updatedAt: AT, listId: null },
+    ]);
+    const own = { id: "cat-a-list-1", name: "架空の売り場A", sort: 1, updatedAt: AT, listId: "list-1" };
+    store.commitNow([{ action: "put", table: "categories", row: own }]);
+    expect(store.rows("categories").find((row) => row.id === own.id)).toEqual(own);
+    // リストは今までどおり(list_id の列を持たない)
+    store.commitNow([{ action: "put", table: "lists", row: { id: "list-1", name: "架空のリスト", sort: 1, updatedAt: AT } }]);
+    expect(store.rows("lists")).toEqual([{ id: "list-1", name: "架空のリスト", sort: 1, updatedAt: AT }]);
   });
 });
 
@@ -144,6 +172,7 @@ describe("SqliteLocalStore", () => {
     old.commitNow([put(item())]);
     db.exec("ALTER TABLE items DROP COLUMN checked_updated_at");
     db.exec("ALTER TABLE stores DROP COLUMN list_id");
+    db.exec("ALTER TABLE categories DROP COLUMN list_id");
     db.exec("DROP TABLE forgotten_items");
     dropDest(db);
     db.exec("PRAGMA user_version = 1");
@@ -389,6 +418,7 @@ describe("保存先", () => {
     const db = openTestDatabase();
     new SqliteLocalStore(db).commitNow([{ action: "put", table: "lists", row: SHEET_LIST }]);
     dropDest(db);
+    db.exec("ALTER TABLE categories DROP COLUMN list_id");
     db.exec("PRAGMA user_version = 5");
     expect(new SqliteLocalStore(db).listDestinations().get(SHEET_LIST.id)).toBe("sheets");
   });

@@ -34,6 +34,7 @@ const category = (id: Id, sort: number): Category => ({
   name: id,
   sort,
   updatedAt: "2028-01-01T00:00:00.000Z",
+  listId: "list-a",
 });
 const categories: Category[] = categoryIds.map(category);
 

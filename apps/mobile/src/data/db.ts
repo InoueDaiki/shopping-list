@@ -105,6 +105,12 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE history ADD COLUMN dest TEXT NOT NULL DEFAULT 'sheets';
     `,
   },
+  {
+    // カテゴリのマスタをリストごとに持つ。空は版 7 までのシートの共通のカテゴリで、同期のたびに
+    // リストごとに分ける(Repository.splitSharedCategories)。版 6 は保存先の列(dest)
+    version: 7,
+    sql: `ALTER TABLE categories ADD COLUMN list_id TEXT;`,
+  },
 ];
 
 export function migrate(db: Database): void {

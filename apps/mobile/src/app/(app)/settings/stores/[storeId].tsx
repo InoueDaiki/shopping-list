@@ -24,9 +24,10 @@ export default function StoreDetail() {
   const lists = useTable("lists");
   const categories = useTable("categories");
   const store = stores.find((row) => row.id === storeId);
-  const learned = useOrder(storeId);
   const [name, setName] = useState(store?.name ?? "");
   const [listId, setListId] = useState(store?.listId ?? undefined);
+  // 並ぶのは店舗のリストのカテゴリ。リストの決まっていない店舗は、ここで選んだリストのカテゴリ
+  const learned = useOrder(storeId, listId ?? null);
   // 座標は入力欄の文字が正。触っていなければ保存で書き換えない
   const [openedCoordinates] = useState(coordinatesOf(store));
   const [coordinates, setCoordinates] = useState(openedCoordinates);
@@ -70,7 +71,8 @@ export default function StoreDetail() {
       patch.lng = point?.lng ?? null;
     }
     if (Object.keys(patch).length > 0) repository.updateStore(store.id, patch);
-    if (order) repository.saveStoreOrder(store.id, [...order]);
+    // 別のリストへ移すときは、並べ替えた順番(前のリストのカテゴリ)を保存しない
+    if (order && (store.listId === null || listId === store.listId)) repository.saveStoreOrder(store.id, [...order]);
     router.back();
   };
 

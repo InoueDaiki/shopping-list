@@ -152,6 +152,7 @@ export default function Lists() {
         items={[
           { label: "名前を変える", onPress: () => setRenaming(target) },
           { label: "品目の管理", onPress: () => target && router.push(`/lists/${target.id}/registered`) },
+          { label: "カテゴリ", onPress: () => target && router.push(`/lists/${target.id}/categories`) },
           ...(connected ? [{ label: "保存先を変える", onPress: () => setMoving(target) }] : []),
           { label: "削除する", tone: "danger", onPress: () => setDeleting(target) },
         ]}
@@ -160,7 +161,7 @@ export default function Lists() {
         open={deleting !== null}
         tone="danger"
         title={`「${deleting?.name ?? ""}」を削除しますか`}
-        description="リストの品目と店舗も一緒に削除します。元に戻せません。"
+        description="リストの品目と店舗、カテゴリも一緒に削除します。元に戻せません。"
         confirmLabel="削除する"
         onConfirm={() => {
           if (deleting) repository.deleteList(deleting.id);

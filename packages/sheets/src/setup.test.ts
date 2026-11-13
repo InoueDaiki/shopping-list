@@ -1,7 +1,6 @@
-import { INFERENCE_DICTIONARY } from "@shopping-list/core";
 import { describe, expect, it } from "vitest";
 
-import { INITIAL_CATEGORIES, buildSetupRequests } from "./setup.ts";
+import { buildSetupRequests } from "./setup.ts";
 import { SCHEMA_VERSION, SHEETS, TABLE_SHEETS } from "./schema.ts";
 import { parseSpreadsheetId } from "./spreadsheetId.ts";
 
@@ -121,16 +120,20 @@ describe("buildSetupRequests", () => {
     expect(protections.every((r) => r.protectedRange.warningOnly === true)).toBe(true);
   });
 
-  it("初期のカテゴリとスキーマの版を入れる", () => {
-    const [categories, meta] = of("appendCells");
-    expect(categories?.rows).toHaveLength(INITIAL_CATEGORIES.length);
-    expect(categories?.rows[0].values[1].userEnteredValue.stringValue).toBe("鮮魚");
-    expect(meta?.rows[0].values[0].userEnteredValue.numberValue).toBe(
-      SCHEMA_VERSION,
-    );
-    expect(new Set(INITIAL_CATEGORIES.map((c) => c.id)).size).toBe(
-      INITIAL_CATEGORIES.length,
-    );
+  it("カテゴリのリストは空を許す Lists のプルダウンで、末尾の列に置く", () => {
+    const categories = TABLE_SHEETS.categories;
+    const index = categories.columns.findIndex((c) => c.name === "list_id");
+    expect(categories.columns.map((c) => c.name).slice(-2)).toEqual(["deleted_at", "list_id"]);
+    expect(ruleOn(categories.sheetId, index)).toMatchObject({
+      condition: { type: "ONE_OF_RANGE", values: [{ userEnteredValue: "=Lists!$A$2:$A" }] },
+    });
+  });
+
+  it("スキーマの版だけを入れ、カテゴリは入れない(リストを足すときに端末が入れる)", () => {
+    const seeds = of("appendCells");
+    expect(seeds).toHaveLength(1);
+    expect(seeds[0]?.sheetId).toBe(SHEETS.find((def) => def.name === "Meta")?.sheetId);
+    expect(seeds[0]?.rows[0].values[0].userEnteredValue.numberValue).toBe(SCHEMA_VERSION);
   });
 });
 
@@ -155,11 +158,5 @@ describe("parseSpreadsheetId", () => {
     "",
   ])("%s は取り出さない", (input) => {
     expect(parseSpreadsheetId(input)).toBeNull();
-  });
-});
-
-describe("INITIAL_CATEGORIES", () => {
-  it("推定の辞書のキーは初期のカテゴリの名前と一致する", () => {
-    expect(Object.keys(INFERENCE_DICTIONARY).sort()).toEqual(INITIAL_CATEGORIES.map((c) => c.name).sort());
   });
 });

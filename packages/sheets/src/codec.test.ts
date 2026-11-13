@@ -1,4 +1,4 @@
-import type { HistoryEntry, Item, ShoppingList, Store, StoreOrder } from "@shopping-list/core";
+import type { Category, HistoryEntry, Item, ShoppingList, Store, StoreOrder } from "@shopping-list/core";
 import { describe, expect, it } from "vitest";
 
 import type { Cell } from "./client.ts";
@@ -202,6 +202,44 @@ describe("Stores の list_id", () => {
     const cells = asRead(encodeRow("stores", store));
     cells[7] = "リスト!";
     expect(decodeRow("stores", cells, 2).kind).toBe("issue");
+  });
+});
+
+describe("Categories の list_id", () => {
+  const category: Category = { id: "cat_1-list_1", name: "架空の売り場", sort: 3, updatedAt: AT, listId: "list_1" };
+
+  it("末尾の列に置き、往復できる", () => {
+    const cells = encodeRow("categories", category);
+    const columns = TABLE_SHEETS.categories.columns.map((column) => column.name);
+    expect(columns.slice(-2)).toEqual(["deleted_at", "list_id"]);
+    expect(cells).toHaveLength(columns.length);
+    expect(cells.at(-1)).toBe("list_1");
+    expect(decodeRow("categories", asRead(cells), 2)).toEqual({ kind: "row", row: category, deletedAt: null });
+  });
+
+  it("前の版の列の少ない行と、空の行(共通のカテゴリ)は null で読む", () => {
+    const shared = { ...category, id: "cat_1", listId: null };
+    const cells = asRead(encodeRow("categories", shared));
+    expect(cells.at(-1)).toBe("");
+    expect(decodeRow("categories", cells, 2)).toEqual({ kind: "row", row: shared, deletedAt: null });
+    expect(decodeRow("categories", cells.slice(0, 4), 2)).toEqual({ kind: "row", row: shared, deletedAt: null });
+  });
+
+  it("墓石の時刻は deleted_at の列から読む(list_id と取り違えない)", () => {
+    const cells = asRead(encodeRow("categories", category));
+    cells[4] = AT;
+    expect(decodeRow("categories", cells, 2)).toEqual({ kind: "row", row: category, deletedAt: AT });
+  });
+
+  it("送信待ちの古い行の listId が無ければ空で書く", () => {
+    const { listId: _, ...old } = category;
+    expect(encodeRow("categories", old as Category).at(-1)).toBeNull();
+  });
+
+  it("ID の形でないリストは不正な行にする", () => {
+    const cells = asRead(encodeRow("categories", category));
+    cells[5] = "リスト!";
+    expect(decodeRow("categories", cells, 2).kind).toBe("issue");
   });
 });
 

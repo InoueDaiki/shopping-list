@@ -1,12 +1,14 @@
 // 行とデータの型の変換と検査。シートは直接触れるので、読むときは何も信じない。
 
 import type {
+  Category,
   CategorySource,
   ForgottenItem,
   HistoryEntry,
   Item,
   RowIssue,
   RowOf,
+  ShoppingList,
   Store,
   SyncTable,
   TableRows,
@@ -141,7 +143,7 @@ interface Codec<T> {
 
 // deleted_at は行の型に持たない。読むときは decodeRow が返し、書くときは空にする
 // (行全体を書くのは put だけで、put は行を生き返らせる)
-const named: Codec<{ id: string; name: string; sort: number; updatedAt: string }> = {
+const lists: Codec<ShoppingList> = {
   decode: (r) => ({
     id: r.id("id"),
     name: r.text("name"),
@@ -149,6 +151,19 @@ const named: Codec<{ id: string; name: string; sort: number; updatedAt: string }
     updatedAt: r.iso("updated_at"),
   }),
   encode: (row) => [row.id, row.name, row.sort, row.updatedAt, null],
+};
+
+const categories: Codec<Category> = {
+  decode: (r) => ({
+    id: r.id("id"),
+    name: r.text("name"),
+    sort: r.number("sort"),
+    updatedAt: r.iso("updated_at"),
+    // 空は版 7 までの共通のカテゴリ。前の版の列の少ない行も空として読む
+    listId: r.optionalId("list_id"),
+  }),
+  // 版を上げる前の送信待ちの行には listId が無い
+  encode: (row) => [row.id, row.name, row.sort, row.updatedAt, null, row.listId ?? null],
 };
 
 const stores: Codec<Store> = {
@@ -240,8 +255,8 @@ const forgottenItems: Codec<ForgottenItem> = {
 };
 
 const CODECS: { [T in SyncTable]: Codec<TableRows[T]> } = {
-  lists: named,
-  categories: named,
+  lists,
+  categories,
   stores,
   items,
   history,

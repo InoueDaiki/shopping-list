@@ -162,6 +162,17 @@ describe("crossListSuggestions", () => {
     expect(crossListSuggestions({ ...base, query: "たま", history, items }).map((item) => item.listId)).toEqual(["list-b"]);
   });
 
+  it("候補のカテゴリは、その候補のリストの記録のもの(カテゴリはリストごと)", () => {
+    const history = [
+      { ...bought("たまご", 1), categoryId: "a-eggs" },
+      { ...bought("たまご", 1, "list-b"), categoryId: "b-eggs" },
+    ];
+    expect(crossListSuggestions({ ...base, query: "たま", history }).map(({ listId, categoryId }) => [listId, categoryId])).toEqual([
+      ["list-a", "a-eggs"],
+      ["list-b", "b-eggs"],
+    ]);
+  });
+
   it("空の入力は候補にしない", () => {
     expect(crossListSuggestions({ ...base, query: " ", history: [bought("たまご", 1)] })).toEqual([]);
   });

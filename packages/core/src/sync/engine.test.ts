@@ -781,7 +781,7 @@ describe("planPush", () => {
         {
           action: "put",
           table: "categories",
-          row: { id: "c1", name: "鮮魚", sort: 1, updatedAt: T(1) },
+          row: { id: "c1", name: "鮮魚", sort: 1, updatedAt: T(1), listId: null },
           seq: 2,
         },
       ],

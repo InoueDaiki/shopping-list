@@ -1,0 +1,25 @@
+# カテゴリはリストごとに持つ。リスト一覧の「…」の「カテゴリ」から、そのリストだけを直す。
+# デモモードの初期データ(apps/mobile/src/data/demo.ts)の2つのリストを使う
+appId: io.github.inouedaiki.shoppinglist
+---
+- launchApp:
+    clearState: true
+
+# スーパーにカテゴリを足す。新しいカテゴリは末尾に入る
+- tapOn: スーパーの操作
+- tapOn: カテゴリ
+- assertVisible: 鮮魚
+- tapOn: カテゴリを追加
+- inputText: テスト売り場
+- tapOn: 追加する
+- scrollUntilVisible:
+    element: テスト売り場
+- back
+
+# ほかのリストのカテゴリは変わらない。初期のカテゴリの末尾まで見ても出ない
+- tapOn: ドラッグストアの操作
+- tapOn: カテゴリ
+- assertVisible: 鮮魚
+- scrollUntilVisible:
+    element: 医薬品
+- assertNotVisible: テスト売り場

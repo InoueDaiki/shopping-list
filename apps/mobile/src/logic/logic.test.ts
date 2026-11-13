@@ -133,7 +133,7 @@ describe("splitMemo", () => {
 
 describe("categoryToneMap", () => {
   it("マスタの順に8色を回す", () => {
-    const categories = Array.from({ length: 9 }, (_, index) => ({ id: `c${index}`, name: "", sort: 9 - index, updatedAt: "" }));
+    const categories = Array.from({ length: 9 }, (_, index) => ({ id: `c${index}`, name: "", sort: 9 - index, updatedAt: "", listId: "list" }));
     const tones = categoryToneMap(categories);
     expect(tones.get("c8")).toBe("cat-1");
     expect(tones.get("c0")).toBe("cat-1");

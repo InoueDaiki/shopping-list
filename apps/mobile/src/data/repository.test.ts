@@ -1,4 +1,4 @@
-import { HOUR_MS, MemoryLocalStore, MemoryRemoteStore, STORE_CORRECTION_MS, SyncEngine, TRIP_GAP_MS, type Id, type Item, type LocalChange, type Store } from "@shopping-list/core";
+import { HOUR_MS, initialCategories, MemoryLocalStore, MemoryRemoteStore, STORE_CORRECTION_MS, SyncEngine, TRIP_GAP_MS, type Category, type Id, type Item, type LocalChange, type Store } from "@shopping-list/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { SqliteLocalStore } from "./localStore.ts";
@@ -100,6 +100,226 @@ describe("Repository", () => {
     expect(store.rows("items")).toEqual([]);
   });
 
+  describe("リストごとのカテゴリ", () => {
+    const ofList = (listId: Id) => store.rows("categories").filter((row) => row.listId === listId);
+
+    it("リストを足すと、そのリストの初期のカテゴリも同じコミットで入る", () => {
+      const commits: number[] = [];
+      store.subscribe("categories", () => commits.push(store.rows("lists").length));
+      const listId = repo.addList("架空のリスト");
+      expect(ofList(listId)).toEqual(initialCategories(listId));
+      expect(store.rows("categories")).toHaveLength(initialCategories(listId).length);
+      // カテゴリが見えたときには、リストももうある
+      expect(commits).toEqual([1]);
+      // リストの行と、カテゴリの行の数だけ送る
+      expect(store.pendingCountNow()).toBe(1 + initialCategories(listId).length);
+    });
+
+    it("リストごとに別のカテゴリを持つ", () => {
+      const [first, second] = [repo.addList("一"), repo.addList("二")];
+      const ids = new Set(ofList(first).map((row) => row.id));
+      expect(ofList(second).some((row) => ids.has(row.id))).toBe(false);
+      expect(ofList(second).map((row) => row.name)).toEqual(ofList(first).map((row) => row.name));
+    });
+
+    it("リストを消すと、そのリストのカテゴリだけが消え、墓石を送る", async () => {
+      const remote = new MemoryRemoteStore();
+      const engine = new SyncEngine({ local: store, remote });
+      const [gone, kept] = [repo.addList("消すリスト"), repo.addList("残るリスト")];
+      const count = ofList(gone).length;
+      await engine.sync();
+      clock += 1000;
+
+      repo.deleteList(gone);
+      expect(ofList(gone)).toEqual([]);
+      expect(ofList(kept)).toHaveLength(count);
+      await engine.sync();
+      expect(remote.deletedAt.categories.size).toBe(count);
+    });
+
+    it("リストの無いカテゴリを片付ける。共通のカテゴリ(移行の途中)は残す", () => {
+      const listId = repo.addList("残るリスト");
+      const row = (id: Id, owner: Id | null): Category => ({ id, name: id, sort: 99, updatedAt: "", listId: owner });
+      store.commitNow([row("orphan", "deleted-list"), row("shared", null)].map((category) => ({ action: "put", table: "categories", row: category })));
+      const pending = store.pendingCountNow();
+
+      expect(repo.removeOrphanCategories()).toBe(1);
+
+      expect(store.rows("categories").some((category) => category.id === "orphan")).toBe(false);
+      expect(store.rows("categories").some((category) => category.id === "shared")).toBe(true);
+      expect(ofList(listId)).toHaveLength(initialCategories(listId).length);
+      expect(store.pendingCountNow()).toBe(pending + 1);
+      expect(repo.removeOrphanCategories()).toBe(0);
+    });
+
+    it("カテゴリはそのリストの末尾に足し、並べ替えもそのリストの中だけで動く", () => {
+      const [first, second] = [repo.addList("一"), repo.addList("二")];
+      const last = initialCategories(first).length;
+      const added = repo.addCategory(first, " 架空の売り場 ");
+      expect(ofList(first).at(-1)).toMatchObject({ id: added, name: "架空の売り場", sort: last + 1, listId: first });
+      expect(ofList(second)).toHaveLength(last);
+
+      const before = ofList(second);
+      repo.moveCategory(added, -1);
+      expect(ofList(first).map((row) => row.id).slice(-2)).toEqual([added, initialCategories(first).at(-1)?.id]);
+      // 端では動かさない
+      repo.moveCategory(ofList(first)[0].id, -1);
+      expect(ofList(first).map((row) => row.id).slice(-2)).toEqual([added, initialCategories(first).at(-1)?.id]);
+      expect(ofList(second)).toEqual(before);
+    });
+  });
+
+  describe("splitSharedCategories", () => {
+    const EDITED = "2027-06-01T00:00:00.000Z";
+    const shared = (id: Id, name: string, sort: number): Category => ({ id, name, sort, updatedAt: EDITED, listId: null });
+    const SHARED = [shared("cat_meat", "お肉", 2), shared("custom", "架空の売り場", 5)];
+    const put = <T extends "lists" | "categories" | "items" | "stores" | "storeOrders" | "history">(table: T, row: unknown) =>
+      ({ action: "put", table, row }) as LocalChange;
+    const storeRow = (id: Id, listId: Id | null): Store => ({ id, name: id, lat: null, lng: null, createdAt: EDITED, updatedAt: EDITED, listId });
+    // 版 7 までのシートの写し。カテゴリは共通で、リストは初期のカテゴリを持たない
+    const seed = (target: SqliteLocalStore | MemoryLocalStore = store): LocalChange[] => {
+      const changes = [
+        put("lists", { id: "l1", name: "一", sort: 1, updatedAt: EDITED }),
+        put("lists", { id: "l2", name: "二", sort: 2, updatedAt: EDITED }),
+        ...SHARED.map((row) => put("categories", row)),
+        put("items", { ...itemRow("i1", "l1"), categoryId: "cat_meat", categorySource: "user", checkedUpdatedAt: EDITED, updatedAt: EDITED }),
+        put("items", { ...itemRow("i2", "l2"), categoryId: "custom", categorySource: "history", checkedUpdatedAt: EDITED, updatedAt: EDITED }),
+        put("items", { ...itemRow("i3", "l1"), checkedUpdatedAt: EDITED, updatedAt: EDITED }),
+        put("items", { ...itemRow("stray", "l1"), listId: null, categoryId: "cat_meat", categorySource: "inferred", checkedUpdatedAt: EDITED, updatedAt: EDITED }),
+        put("stores", storeRow("s1", "l1")),
+        put("stores", storeRow("s0", null)),
+        put("storeOrders", { storeId: "s1", categoryIds: ["custom", "cat_meat"], editedAt: EDITED }),
+        put("storeOrders", { storeId: "s0", categoryIds: ["cat_meat", "custom"], editedAt: EDITED }),
+        put("history", { id: "h1", listId: "l1", name: "架空の牛乳", categoryId: "cat_meat", categorySource: "history", storeId: null, tripId: null, checkedAt: EDITED, checkedSeq: 0 }),
+      ];
+      if (target instanceof SqliteLocalStore) target.commitNow(changes);
+      return changes;
+    };
+    const byId = <T extends { id: Id }>(rows: readonly T[]) => [...rows].sort((a, b) => (a.id < b.id ? -1 : 1));
+
+    it("共通のカテゴリをリストごとに分け、品目と手の順番の参照を書き換え、共通のカテゴリを消す", () => {
+      seed();
+      clock += 1000;
+      const now = new Date(clock).toISOString();
+      expect(repo.splitSharedCategories()).toBeGreaterThan(0);
+
+      // 名前、sort、updated_at は共通のカテゴリのまま
+      expect(byId(store.rows("categories"))).toEqual(
+        byId([
+          { ...SHARED[0], id: "cat_meat-l1", listId: "l1" },
+          { ...SHARED[0], id: "cat_meat-l2", listId: "l2" },
+          { ...SHARED[1], id: "custom-l1", listId: "l1" },
+          { ...SHARED[1], id: "custom-l2", listId: "l2" },
+        ]),
+      );
+      expect(itemOf("i1")).toMatchObject({ categoryId: "cat_meat-l1", categorySource: "user", updatedAt: now, checkedUpdatedAt: EDITED });
+      expect(itemOf("i2")).toMatchObject({ categoryId: "custom-l2", categorySource: "history", updatedAt: now });
+      // 未分類の品目には触らない
+      expect(itemOf("i3")).toMatchObject({ categoryId: null, updatedAt: EDITED });
+      // 野良品目はカテゴリを持たない
+      expect(itemOf("stray")).toMatchObject({ listId: null, categoryId: null, categorySource: null, updatedAt: now });
+      // 手の順番は、並べ替えた時刻を 1ms だけ進めて書き換える。リストの決まっていない店舗の分はそのまま
+      expect(store.rows("storeOrders")).toEqual([
+        { storeId: "s0", categoryIds: ["cat_meat", "custom"], editedAt: EDITED },
+        { storeId: "s1", categoryIds: ["custom-l1", "cat_meat-l1"], editedAt: "2027-06-01T00:00:00.001Z" },
+      ]);
+      // History は書き換えない(読むときに rehomeHistory で読み替える)
+      expect(store.rows("history")[0]?.categoryId).toBe("cat_meat");
+    });
+
+    it("2回目は何もせず、書かない", () => {
+      seed();
+      repo.splitSharedCategories();
+      const pending = store.pendingCountNow();
+      const categories = store.rows("categories");
+      const notified: string[] = [];
+      for (const table of ["categories", "items", "storeOrders"] as const) store.subscribe(table, () => notified.push(table));
+
+      expect(repo.splitSharedCategories()).toBe(0);
+
+      expect(store.pendingCountNow()).toBe(pending);
+      expect(store.rows("categories")).toBe(categories);
+      expect(notified).toEqual([]);
+    });
+
+    it("共通のカテゴリが無ければ何もしない", () => {
+      const listId = repo.addList("架空のリスト");
+      repo.addItem(listId, "品物", { categoryId: initialCategories(listId)[0].id, categorySource: "history" });
+      const pending = store.pendingCountNow();
+      expect(repo.splitSharedCategories()).toBe(0);
+      expect(store.pendingCountNow()).toBe(pending);
+    });
+
+    it("リストが1つも無ければ共通のカテゴリを残し、リストができたときに分ける", () => {
+      store.commitNow(SHARED.map((row) => put("categories", row)));
+      expect(repo.splitSharedCategories()).toBe(0);
+      expect(store.rows("categories")).toEqual(SHARED);
+
+      const listId = repo.addList("架空のリスト");
+      repo.splitSharedCategories();
+      const categories = store.rows("categories");
+      expect(categories.every((row) => row.listId === listId)).toBe(true);
+      // 初期のカテゴリと同じ ID のものは足さず(上書きしない)、無いものだけを足す
+      expect(categories).toHaveLength(initialCategories(listId).length + 1);
+      expect(categories.find((row) => row.id === `cat_meat-${listId}`)?.name).toBe("生肉");
+      expect(categories.find((row) => row.id === `custom-${listId}`)).toMatchObject({ name: "架空の売り場", sort: 5, updatedAt: EDITED });
+    });
+
+    it("消えたリストの品目と店舗の手の順番には触らない", () => {
+      seed();
+      store.commitNow([
+        put("items", { ...itemRow("orphan", "deleted-list"), categoryId: "cat_meat" }),
+        put("stores", storeRow("gone", "deleted-list")),
+        put("storeOrders", { storeId: "gone", categoryIds: ["cat_meat"], editedAt: EDITED }),
+      ]);
+      repo.splitSharedCategories();
+      expect(itemOf("orphan")?.categoryId).toBe("cat_meat");
+      expect(store.rows("storeOrders").find((row) => row.storeId === "gone")?.categoryIds).toEqual(["cat_meat"]);
+      expect(store.rows("categories").some((row) => row.listId === "deleted-list")).toBe(false);
+    });
+
+    it("2台が同時に分けても同じ行になり、同期の後も同じ形に落ち着く", async () => {
+      const remote = new MemoryRemoteStore();
+      const setup = new MemoryLocalStore();
+      await setup.commit(seed(setup));
+      await new SyncEngine({ local: setup, remote }).sync();
+
+      const device = (startAt: number) => {
+        const local = new SqliteLocalStore(openTestDatabase());
+        let at = startAt;
+        const repository = new Repository({ store: local, newId: () => "unused", now: () => new Date(at++).toISOString(), learnedOrder: () => null });
+        return { local, repository, engine: new SyncEngine({ local, remote }) };
+      };
+      // 時計の違う2台が、同じ写しから別々に分ける
+      const [a, b] = [device(START), device(START + 5000)];
+      await a.engine.sync();
+      await b.engine.sync();
+      a.repository.splitSharedCategories();
+      b.repository.splitSharedCategories();
+
+      expect(a.local.rows("categories")).toHaveLength(4);
+      expect(a.local.rows("categories")).toEqual(b.local.rows("categories"));
+      expect(a.local.rows("storeOrders")).toEqual(b.local.rows("storeOrders"));
+
+      for (const { engine } of [a, b, a, b]) await engine.sync();
+      for (const { repository } of [a, b]) expect(repository.splitSharedCategories()).toBe(0);
+
+      expect(a.local.rows("categories")).toHaveLength(4);
+      expect(a.local.rows("categories").every((row) => row.listId !== null)).toBe(true);
+      for (const table of ["categories", "storeOrders"] as const) expect(a.local.rows(table)).toEqual(b.local.rows(table));
+      // 品目は端末に入った順に並ぶので、ID の順にそろえて比べる
+      expect(byId(a.local.rows("items"))).toEqual(byId(b.local.rows("items")));
+      expect(a.local.rows("items").find((row) => row.id === "i1")?.categoryId).toBe("cat_meat-l1");
+      expect(a.local.pendingCountNow() + b.local.pendingCountNow()).toBe(0);
+
+      // まだ分けていない3台目が読んでも、共通のカテゴリはもう無いので何もしない
+      const c = device(START + 9000);
+      await c.engine.sync();
+      expect(c.local.rows("categories")).toEqual(a.local.rows("categories"));
+      expect(c.repository.splitSharedCategories()).toBe(0);
+    });
+  });
+
   it("リストを消すと品目も墓石の操作になり、同期の後にシートの品目が消える", async () => {
     const remote = new MemoryRemoteStore();
     const engine = new SyncEngine({ local: store, remote });
@@ -165,7 +385,7 @@ describe("Repository", () => {
   });
 
   it("sort が重なったカテゴリも動かせる", () => {
-    const row = (id: Id) => ({ id, name: id, sort: 1, updatedAt: new Date(clock).toISOString() });
+    const row = (id: Id) => ({ id, name: id, sort: 1, updatedAt: new Date(clock).toISOString(), listId: "list" });
     store.commitNow([row("a"), row("b"), { ...row("c"), sort: 2 }].map((category) => ({ action: "put", table: "categories", row: category })));
     repo.moveCategory("b", -1);
     expect(store.rows("categories").map((category) => category.id)).toEqual(["b", "a", "c"]);
@@ -307,50 +527,56 @@ describe("Repository", () => {
   });
 
   describe("野良品目", () => {
-    const stray = (name: string, categoryId: Id | null = null) =>
-      repo.addStrayItem(name, categoryId ? { categoryId, categorySource: "inferred" } : NONE);
+    const stray = (name: string) => repo.addStrayItem(name);
     const history = (id: Id, listId: Id, name: string, categoryId: Id): LocalChange => ({
       action: "put",
       table: "history",
       row: { id, listId, name, categoryId, categorySource: "history", storeId: null, tripId: null, checkedAt: new Date(START).toISOString(), checkedSeq: 0 },
     });
 
-    beforeEach(() => {
-      store.commitNow(
-        CATEGORIES.map((id, index): LocalChange => ({ action: "put", table: "categories", row: { id, name: id, sort: index + 1, updatedAt: "" } })),
-      );
-    });
-
     it("リストを持たずに足し、同じ名前の野良品目は足さない。リストの品目とは別に数える", () => {
       const listId = repo.addList("架空のリスト");
       repo.addItem(listId, "ぎゅうにゅう", NONE);
       const item = stray(" ぎゅうにゅう ");
-      expect(item).toMatchObject({ listId: null, name: "ぎゅうにゅう", checked: false });
+      // カテゴリはリストのものなので持たない
+      expect(item).toMatchObject({ listId: null, name: "ぎゅうにゅう", checked: false, categoryId: null, categorySource: null });
       expect(stray("ギュウニュウ")).toBeNull();
       expect(stray("  ")).toBeNull();
       expect(store.rows("items").filter((row) => row.listId === null)).toHaveLength(1);
     });
 
-    it("リストへ移し、移す先の記録でカテゴリを引き直す", () => {
+    it("リストへ移し、移す先のリストの記録でカテゴリを決める", () => {
       const listId = repo.addList("架空のリスト");
-      store.commitNow([history("h1", listId, "架空の牛乳", "b")]);
-      const item = stray("架空の牛乳", "a")!;
+      const dairy = `cat_dairy-${listId}`;
+      store.commitNow([history("h1", listId, "架空の牛乳", dairy)]);
+      const item = stray("架空の牛乳")!;
       clock += 1000;
       const moved = repo.moveStrayItem(item.id, listId);
-      expect(moved).toMatchObject({ id: item.id, listId, categoryId: "b", categorySource: "history", updatedAt: new Date(clock).toISOString() });
+      expect(moved).toMatchObject({ id: item.id, listId, categoryId: dairy, categorySource: "history", updatedAt: new Date(clock).toISOString() });
       expect(itemOf(item.id)).toEqual(moved);
       // もう野良品目ではないので、もう一度は移さない
       expect(repo.moveStrayItem(item.id, listId)).toBeNull();
     });
 
-    it("利用者が決めたカテゴリと、記録の無い品目のカテゴリはそのまま移す", () => {
+    it("ほかのリストの記録は、同じ名前のカテゴリが移す先にあるときだけ使う", () => {
+      const [listId, other] = [repo.addList("移す先"), repo.addList("ほかのリスト")];
+      const own = repo.addCategory(other, "架空の売り場");
+      store.commitNow([history("h1", other, "架空の牛乳", `cat_dairy-${other}`), history("h2", other, "架空のねじ", own)]);
+      expect(repo.moveStrayItem(stray("架空の牛乳")!.id, listId)).toMatchObject({ categoryId: `cat_dairy-${listId}`, categorySource: "history" });
+      expect(repo.moveStrayItem(stray("架空のねじ")!.id, listId)).toMatchObject({ categoryId: null, categorySource: null });
+    });
+
+    it("共通だったころの ID の履歴も、移す先のリストのカテゴリとして引く", () => {
       const listId = repo.addList("架空のリスト");
-      store.commitNow([history("h1", listId, "架空の牛乳", "b")]);
-      const decided = stray("架空の牛乳")!;
-      repo.updateItem(decided.id, { categoryId: "c" });
-      expect(repo.moveStrayItem(decided.id, listId)).toMatchObject({ categoryId: "c", categorySource: "user" });
-      const unknown = stray("ふしぎな品物", "a")!;
-      expect(repo.moveStrayItem(unknown.id, listId)).toMatchObject({ categoryId: "a", categorySource: "inferred" });
+      store.commitNow([history("h1", listId, "架空の牛乳", "cat_dairy")]);
+      expect(repo.moveStrayItem(stray("架空の牛乳")!.id, listId)?.categoryId).toBe(`cat_dairy-${listId}`);
+    });
+
+    it("記録が無ければ未分類で移す。前の版の野良品目に残っていたカテゴリも外す", () => {
+      const listId = repo.addList("架空のリスト");
+      expect(repo.moveStrayItem(stray("ふしぎな品物")!.id, listId)).toMatchObject({ listId, categoryId: null, categorySource: null });
+      store.commitNow([{ action: "put", table: "items", row: { ...itemRow("old-stray", "x"), listId: null, name: "ふしぎな置き物", categoryId: "cat_dairy", categorySource: "user" } }]);
+      expect(repo.moveStrayItem("old-stray", listId)).toMatchObject({ listId, categoryId: null, categorySource: null });
     });
 
     it("移す先に同じ名前の買っていない品目があれば、野良品目を消してそれを返す", () => {
@@ -526,14 +752,14 @@ describe("Repository", () => {
   });
 
   it("カテゴリを消すと品目は未分類に戻る", () => {
-    const categoryId = repo.addCategory("架空のカテゴリ");
+    const categoryId = repo.addCategory("list", "架空のカテゴリ");
     const item = add("品物", categoryId);
     repo.deleteCategory(categoryId);
     expect(itemOf(item?.id ?? "")).toMatchObject({ categoryId: null, categorySource: null });
   });
 
   it("カテゴリの順を隣と入れ替え、端では動かさない", () => {
-    const [a, b] = [repo.addCategory("一"), repo.addCategory("二")];
+    const [a, b] = [repo.addCategory("list", "一"), repo.addCategory("list", "二")];
     repo.moveCategory(b, -1);
     expect(store.rows("categories").map((row) => row.id)).toEqual([b, a]);
     repo.moveCategory(b, -1);
@@ -847,7 +1073,7 @@ describe("リストの保存先", () => {
 
   it("野良品目をリストへ移すと、そのリストの保存先へ移る", async () => {
     const listId = repo.addList("架空のリスト", "local");
-    const stray = repo.addStrayItem("架空の品物", NONE)!;
+    const stray = repo.addStrayItem("架空の品物")!;
     await engine.sync();
     expect(remote.rows.items).toHaveLength(1);
     clock += 1000;

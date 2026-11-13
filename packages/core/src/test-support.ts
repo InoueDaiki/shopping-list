@@ -2,9 +2,9 @@
 import type { Category, HistoryEntry, Item, Store } from "./types.ts";
 
 export const categoriesFixture: Category[] = [
-  { id: "cat-fish", name: "鮮魚", sort: 1, updatedAt: "2028-01-01T00:00:00.000Z" },
-  { id: "cat-meat", name: "生肉", sort: 2, updatedAt: "2028-01-01T00:00:00.000Z" },
-  { id: "cat-dairy", name: "乳製品", sort: 3, updatedAt: "2028-01-01T00:00:00.000Z" },
+  { id: "cat-fish", name: "鮮魚", sort: 1, updatedAt: "2028-01-01T00:00:00.000Z", listId: "list-a" },
+  { id: "cat-meat", name: "生肉", sort: 2, updatedAt: "2028-01-01T00:00:00.000Z", listId: "list-a" },
+  { id: "cat-dairy", name: "乳製品", sort: 3, updatedAt: "2028-01-01T00:00:00.000Z", listId: "list-a" },
 ];
 
 export function itemFixture(overrides: Partial<Item> = {}): Item {

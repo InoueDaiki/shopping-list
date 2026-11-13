@@ -1,5 +1,6 @@
-import type { Category } from "@shopping-list/core";
-import { ActionSheet, Badge, Button, ConfirmDialog, cx, Icon, PageHeader } from "@shopping-list/ui-native";
+import type { Category, Id } from "@shopping-list/core";
+import { ActionSheet, Badge, Button, ConfirmDialog, cx, FullScreenMessage, Icon, PageHeader } from "@shopping-list/ui-native";
+import { router, useLocalSearchParams } from "expo-router";
 import ArrowDown from "lucide-react-native/icons/arrow-down";
 import ArrowUp from "lucide-react-native/icons/arrow-up";
 import EllipsisVertical from "lucide-react-native/icons/ellipsis-vertical";
@@ -7,25 +8,34 @@ import Plus from "lucide-react-native/icons/plus";
 import { useMemo, useState } from "react";
 import { View } from "react-native";
 
-import { NamePrompt } from "../../../components/NamePrompt.tsx";
-import { Page } from "../../../components/Page.tsx";
-import { useTable } from "../../../data/hooks.ts";
-import { repository } from "../../../data/runtime.ts";
-import { categoryToneMap } from "../../../logic/categoryTone.ts";
+import { NamePrompt } from "../../../../components/NamePrompt.tsx";
+import { Page } from "../../../../components/Page.tsx";
+import { useListCategories, useTable } from "../../../../data/hooks.ts";
+import { repository } from "../../../../data/runtime.ts";
+import { categoryToneMap } from "../../../../logic/categoryTone.ts";
 
-// カテゴリのマスタの編集。ここの順は、まだ順番を学んでいない店舗と、店舗を選んでいないときに使う
+// リストのカテゴリのマスタの編集。カテゴリはリストごとに持ち、ここで直すのはこのリストだけ。
+// ここの順は、まだ順番を学んでいない店舗と、店舗を選んでいないときに使う
 export default function Categories() {
-  const categories = useTable("categories");
+  const { listId } = useLocalSearchParams<{ listId: Id }>();
+  const lists = useTable("lists");
+  const categories = useListCategories(listId);
   const tones = useMemo(() => categoryToneMap(categories), [categories]);
   const [adding, setAdding] = useState(false);
   const [target, setTarget] = useState<Category | null>(null);
   const [renaming, setRenaming] = useState<Category | null>(null);
   const [deleting, setDeleting] = useState<Category | null>(null);
 
+  const list = lists.find((row) => row.id === listId);
+  if (!list) {
+    return <FullScreenMessage action={<Button onPress={() => router.back()}>戻る</Button>}>このリストは削除されました。</FullScreenMessage>;
+  }
+
   return (
     <Page>
       <PageHeader
         title="カテゴリ"
+        description={`${list.name}のカテゴリです。ほかのリストのカテゴリは変わりません。`}
         actions={
           <Button icon variant="ghost" accessibilityLabel="カテゴリを追加" onPress={() => setAdding(true)}>
             <Icon icon={Plus} size={22} />
@@ -68,7 +78,7 @@ export default function Categories() {
         title="カテゴリを追加"
         label="カテゴリの名前"
         confirmLabel="追加する"
-        onSubmit={(name) => repository.addCategory(name)}
+        onSubmit={(name) => repository.addCategory(listId, name)}
         onClose={() => setAdding(false)}
       />
       <NamePrompt

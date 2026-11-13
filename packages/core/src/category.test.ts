@@ -1,6 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { lookupCategory, resolveCategory, type CategoryInferrer } from "./category.ts";
-import { categoriesFixture as categories, historyFixture, itemFixture } from "./test-support.ts";
+import { categoriesFixture, historyFixture, itemFixture } from "./test-support.ts";
+import type { Category } from "./types.ts";
+
+// ほかのリストのカテゴリ。ID はリストごとに別で、名前が同じものと、list-a に無い名前のものがある
+const other = (id: string, name: string, listId: string): Category => ({ id, name, sort: 1, updatedAt: "2028-01-01T00:00:00.000Z", listId });
+const categories: Category[] = [
+  ...categoriesFixture,
+  other("b-fish", "鮮魚", "list-b"),
+  other("b-meat", "生肉", "list-b"),
+  other("b-tools", "架空の道具", "list-b"),
+  other("c-meat", "生肉", "list-c"),
+];
 
 const base = { name: "タマゴ", listId: "list-a", categories, items: [], history: [] };
 
@@ -14,7 +25,7 @@ describe("resolveCategory", () => {
       historyFixture({
         id: "h1",
         listId: "list-b",
-        categoryId: "cat-meat",
+        categoryId: "b-meat",
         checkedAt: "2029-01-01T00:00:00.000Z",
       }),
       historyFixture({ id: "h2", listId: "list-a", categoryId: "cat-dairy" }),
@@ -25,18 +36,31 @@ describe("resolveCategory", () => {
     });
   });
 
-  it("リストの無い品目(野良品目)では、どの記録もほかのリストとして見る", async () => {
-    const items = [itemFixture({ id: "stray", listId: null, categoryId: "cat-fish", categorySource: "inferred" })];
-    const history = [historyFixture({ listId: "list-b", categoryId: "cat-meat" })];
-    expect(await resolveCategory({ ...base, listId: null, items, history })).toEqual({
-      categoryId: "cat-meat",
-      categorySource: "history",
-    });
+  it("同じリストに無ければ、ほかのリストの記録を、同じ名前のこのリストのカテゴリとして引く", async () => {
+    const history = [historyFixture({ listId: "list-b", categoryId: "b-meat" })];
+    expect(await resolveCategory({ ...base, history })).toEqual({ categoryId: "cat-meat", categorySource: "history" });
   });
 
-  it("同じリストに無ければほかのリストから引く", async () => {
-    const history = [historyFixture({ listId: "list-b", categoryId: "cat-meat" })];
-    expect((await resolveCategory({ ...base, history })).categoryId).toBe("cat-meat");
+  it("ほかのリストの記録は、同じ名前のカテゴリがこのリストに無ければ使わない", async () => {
+    const history = [historyFixture({ listId: "list-b", categoryId: "b-tools" })];
+    expect((await resolveCategory({ ...base, history })).categoryId).toBeNull();
+  });
+
+  it("ほかのリストの記録の ID がこのリストのカテゴリでも、同じリストの記録としては使わない", async () => {
+    // 壊れたデータ。名前で引くので、結果はこのリストのカテゴリになる
+    const history = [historyFixture({ listId: "list-b", categoryId: "cat-dairy" })];
+    expect((await resolveCategory({ ...base, history })).categoryId).toBe("cat-dairy");
+  });
+
+  it("同じリストの記録がほかのリストのカテゴリを指していたら使わない", async () => {
+    const history = [historyFixture({ listId: "list-a", categoryId: "b-meat" })];
+    expect((await resolveCategory({ ...base, history })).categoryId).toBeNull();
+  });
+
+  it("推定にはそのリストのカテゴリだけを渡し、ほかのリストの ID は受け取らない", async () => {
+    const inferrer = inferring("b-meat");
+    expect((await resolveCategory({ ...base, inferrer })).categoryId).toBeNull();
+    expect(inferrer.infer).toHaveBeenCalledWith("タマゴ", categoriesFixture);
   });
 
   it("同じリストの中では新しい記録より利用者の修正を使う", async () => {
@@ -51,12 +75,12 @@ describe("resolveCategory", () => {
 
   it("ほかのリストの中でも利用者の修正を使う", async () => {
     const items = [
-      itemFixture({ listId: "list-b", categoryId: "cat-fish", categorySource: "user" }),
+      itemFixture({ listId: "list-b", categoryId: "b-fish", categorySource: "user" }),
     ];
     const history = [
       historyFixture({
         listId: "list-c",
-        categoryId: "cat-meat",
+        categoryId: "c-meat",
         checkedAt: "2029-01-01T00:00:00.000Z",
       }),
     ];

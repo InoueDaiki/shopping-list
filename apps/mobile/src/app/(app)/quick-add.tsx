@@ -4,10 +4,10 @@ import { router } from "expo-router";
 import { useDeferredValue, useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 
-import { addListItem, addStrayItem } from "../../data/addItem.ts";
-import { useTable } from "../../data/hooks.ts";
+import { addListItem, addStrayItem, moveStrayItem } from "../../data/addItem.ts";
+import { useHistory, useTable } from "../../data/hooks.ts";
 import { prepareItemInference } from "../../data/inference.ts";
-import { localStore, repository } from "../../data/runtime.ts";
+import { localStore } from "../../data/runtime.ts";
 import { openItemNamed } from "../../logic/listRows.ts";
 
 // 候補の行数の上限。キーボードと合わせて、面が画面を覆い切らない高さに抑える
@@ -52,7 +52,7 @@ export default function QuickAdd() {
   const moveTo = (list: ShoppingList) => {
     setChoosing(false);
     if (added === null) return;
-    const moved = repository.moveStrayItem(added.id, list.id);
+    const moved = moveStrayItem(added.id, list.id);
     if (moved) openList(list.id);
   };
 
@@ -130,7 +130,7 @@ interface SuggestionsProps {
 // すべてのリストの過去の品目から、打った文字に合う名前をリストごとに出す
 function Suggestions({ query, listNames, onSelect }: SuggestionsProps) {
   const lists = useTable("lists");
-  const history = useTable("history");
+  const history = useHistory();
   const forgotten = useTable("forgottenItems");
   const items = useTable("items");
   const deferred = useDeferredValue(query);

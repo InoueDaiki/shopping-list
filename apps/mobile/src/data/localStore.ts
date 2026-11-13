@@ -54,7 +54,15 @@ const namedSorted = {
 
 const TABLES: { [T in SyncTable]: TableDef<TableRows[T]> } = {
   lists: { ...namedSorted, name: "lists" },
-  categories: { ...namedSorted, name: "categories" },
+  categories: {
+    name: "categories",
+    key: "id",
+    columns: [...namedSorted.columns, "list_id"],
+    orderBy: namedSorted.orderBy,
+    // 属するリスト。版を上げる前の送信待ちの行には listId が無い
+    encode: (row: Category) => [...namedSorted.encode(row), row.listId ?? null],
+    decode: (row) => ({ ...namedSorted.decode(row), listId: row.list_id as Id | null }),
+  },
   stores: {
     name: "stores",
     key: "id",

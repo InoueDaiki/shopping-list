@@ -15,7 +15,12 @@ vi.mock("./runtime.ts", () => ({
 }));
 
 const NONE = { categoryId: null, categorySource: null };
-const DAIRY: Category = { id: "cat-dairy", name: "乳製品", sort: 1, updatedAt: "2028-01-01T00:00:00.000Z" };
+const AT = "2028-01-01T00:00:00.000Z";
+const DAIRY: Category = { id: "cat-dairy", name: "乳製品", sort: 1, updatedAt: AT, listId: "list" };
+// 辞書に無い架空の売り場。履歴だけで学ぶ
+const PARTS: Category = { id: "cat-parts", name: "架空の部品", sort: 2, updatedAt: AT, listId: "list" };
+const OTHER_DAIRY: Category = { id: "other-dairy", name: "乳製品", sort: 1, updatedAt: AT, listId: "other" };
+const OTHER_PARTS: Category = { id: "other-parts", name: "架空の部品", sort: 2, updatedAt: AT, listId: "other" };
 
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 5));
 
@@ -28,7 +33,7 @@ describe("inferItemCategory", () => {
     clock = Date.parse("2028-01-01T00:00:00.000Z");
     next = 0;
     mocks.store = new SqliteLocalStore(openTestDatabase());
-    mocks.store.commitNow([{ action: "put", table: "categories", row: DAIRY }]);
+    mocks.store.commitNow([DAIRY, PARTS, OTHER_DAIRY, OTHER_PARTS].map((row) => ({ action: "put", table: "categories", row })));
     repo = new Repository({
       store: mocks.store,
       newId: () => `id-${++next}`,
@@ -83,6 +88,49 @@ describe("inferItemCategory", () => {
 
     await nextTask();
     expect(itemOf(item.id)?.categoryId).toBeNull();
+  });
+
+  it("推定はその品目のリストのカテゴリで返す", async () => {
+    const item = repo.addItem("other", "低脂肪牛乳", NONE) as Item;
+    inferItemCategory(item);
+    await vi.waitFor(() => expect(itemOf(item.id)?.categoryId).toBe("other-dairy"));
+  });
+
+  it("履歴の学習はそのリストの履歴だけを使う", async () => {
+    const learned = (listId: Id, categoryId: Id) =>
+      ["ねじ大", "ねじ中", "ねじ小", "ねじ長", "ねじ短"].map((name, index) => ({
+        action: "put" as const,
+        table: "history" as const,
+        row: { id: `${listId}-${index}`, listId, name, categoryId, categorySource: "user" as const, storeId: null, tripId: null, checkedAt: AT, checkedSeq: 0 },
+      }));
+    mocks.store.commitNow(learned("other", "other-parts"));
+
+    // ほかのリストで学んだ名前は、このリストの推定に使わない(同じ名前のカテゴリがあっても)
+    const here = add("ねじ特大");
+    inferItemCategory(here);
+    await nextTask();
+    expect(itemOf(here.id)?.categoryId).toBeNull();
+
+    const there = repo.addItem("other", "ねじ特大", NONE) as Item;
+    inferItemCategory(there);
+    await vi.waitFor(() => expect(itemOf(there.id)?.categoryId).toBe("other-parts"));
+  });
+
+  it("野良品目は推定しない(カテゴリを持たない)", async () => {
+    const stray = repo.addStrayItem("低脂肪牛乳") as Item;
+    const apply = vi.spyOn(repo, "applyInferredCategory");
+    inferItemCategory(stray);
+    await nextTask();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("野良品目をリストへ移した後は、そのリストのカテゴリで推定できる", async () => {
+    const listId = repo.addList("架空のドラッグストア");
+    const stray = repo.addStrayItem("ハンドソープ") as Item;
+    const moved = repo.moveStrayItem(stray.id, listId) as Item;
+    expect(moved.categoryId).toBeNull();
+    inferItemCategory(moved);
+    await vi.waitFor(() => expect(itemOf(stray.id)).toMatchObject({ categoryId: `cat_household-${listId}`, categorySource: "inferred" }));
   });
 
   it("分類済みの品目は推定しない", async () => {

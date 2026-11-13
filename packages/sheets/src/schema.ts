@@ -2,7 +2,7 @@
 
 import type { SyncTable } from "@shopping-list/core";
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const ID_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
 export const ID_LIST_PATTERN = "^([A-Za-z0-9_-]{1,64}(,[A-Za-z0-9_-]{1,64})*)?$";
@@ -78,13 +78,17 @@ export const SHEETS: readonly SheetDef[] = [
   {
     name: "Categories",
     sheetId: 102,
-    rowCount: 200,
+    // カテゴリはリストごとに持つので、リストの数だけ増える
+    rowCount: 2000,
     columns: [
       id("id"),
       text("name"),
       { name: "sort", kind: "number" },
       iso("updated_at"),
       iso("deleted_at"),
+      // 属するリスト。版 8 で、既存の行の列をずらさないよう deleted_at の後に足した。
+      // 空は版 7 までの共通のカテゴリで、端末がリストごとに分ける
+      ref("list_id", "Lists"),
     ],
   },
   {
@@ -233,6 +237,8 @@ export const UPGRADES: readonly Upgrade[] = [
   // Items の list_id を空にできるようにした(野良品目)。列もシートも足さず、版だけを上げる。
   // 前の版のアプリは空の list_id を読めないので、版を合わせて同期を止めさせる
   { from: 6, columns: {}, sheets: [] },
+  // カテゴリのマスタをリストごとに持つ。list_id が空の行(共通のカテゴリ)は、端末がリストごとに分ける
+  { from: 7, columns: { Categories: ["list_id"] }, sheets: [] },
 ];
 
 // version から今の版までに足したもの。上げられない版なら null

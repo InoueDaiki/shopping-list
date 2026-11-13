@@ -170,7 +170,8 @@ describe("SheetsRemote", () => {
 
       expect(server.sheet("家計簿").grid).toEqual([["日付", "金額"], ["1/1", 100]]);
       await expect(openSpreadsheet(client, spreadsheetId)).resolves.toEqual({ spreadsheetId });
-      expect(server.sheet("Categories").grid.length).toBeGreaterThan(1);
+      // カテゴリはリストごとなので、作るときには入れない
+      expect(server.sheet("Categories").grid).toEqual([["id", "name", "sort", "updated_at", "deleted_at", "list_id"]]);
     });
 
     it("番号が重なるシートがあっても足せる", async () => {
@@ -218,10 +219,15 @@ describe("SheetsRemote", () => {
 
   describe("前の版のシートを上げる", () => {
     const STORE_V3 = ["store1", "架空の店", 1.5, 2.5, T(0), T(0), null];
-    // 前の版のアプリが作った形に戻す。版 6 は形が同じで Items の list_id を空にできないだけ、版 5 は ForgottenItems が無く、
-    // 版 4 は Presence と Meta の印の列も無く、版 3 は Stores の list_id も無い
-    const downgrade = (version: 3 | 4 | 5 | 6) => {
+    // 版 7 までの共通のカテゴリ(list_id の列が無い)
+    const CATEGORY_V7 = ["cat_shared", "架空の売り場", 1, T(0)];
+    // 前の版のアプリが作った形に戻す。版 7 は Categories の list_id が無く、版 6 は Items の list_id を空にできず、
+    // 版 5 は ForgottenItems が無く、版 4 は Presence と Meta の印の列も無く、版 3 は Stores の list_id も無い
+    const downgrade = (version: 3 | 4 | 5 | 6 | 7) => {
       const remove = (title: string) => server.sheets.splice(server.sheets.indexOf(server.sheet(title)), 1);
+      const categories = server.sheet("Categories");
+      categories.columnCount = 5;
+      categories.grid = [categories.grid[0]?.slice(0, 5) ?? [], [...CATEGORY_V7]];
       if (version <= 5) remove("ForgottenItems");
       const meta = server.sheet("Meta");
       meta.grid[1] = [version];
@@ -240,6 +246,10 @@ describe("SheetsRemote", () => {
       server.calls.length = 0;
     };
     const expectUpgraded = () => {
+      const categories = server.sheet("Categories");
+      expect(categories.columnCount).toBe(6);
+      expect(categories.grid[0]?.slice(3)).toEqual(["updated_at", "deleted_at", "list_id"]);
+      expect(categories.grid[1]?.slice(0, 4)).toEqual(CATEGORY_V7);
       const stores = server.sheet("Stores");
       expect(stores.columnCount).toBe(8);
       expect(stores.grid[0]?.slice(5)).toEqual(["updated_at", "deleted_at", "list_id"]);
@@ -262,7 +272,7 @@ describe("SheetsRemote", () => {
       }
     };
 
-    describe.each([3, 4, 5, 6] as const)("版 %i から", (version) => {
+    describe.each([3, 4, 5, 6, 7] as const)("版 %i から", (version) => {
       beforeEach(() => downgrade(version));
 
       it("同期の前に上げ、列をずらさず、行を読める", async () => {
@@ -275,6 +285,8 @@ describe("SheetsRemote", () => {
           lat: 1.5,
           listId: version >= 4 ? "list1" : null,
         });
+        // 共通のカテゴリは list_id が空のまま読む(分けるのは端末)
+        expect(local.rows.categories.get("cat_shared")).toEqual({ id: "cat_shared", name: "架空の売り場", sort: 1, updatedAt: T(0), listId: null });
       });
 
       it("1回の batchUpdate で上げ、2回目は何も書かない", async () => {
@@ -310,8 +322,8 @@ describe("SheetsRemote", () => {
         await expect(surveySpreadsheet(client, spreadsheetId)).resolves.toMatchObject({ outdated: false });
       });
 
-      // 版 6 からはシートを足さない
-      it.skipIf(version === 6)("書き込みが拒否されたら版は上がらず、次に上げ直せる", async () => {
+      // 版 6 と 7 からはシートを足さない
+      it.skipIf(version >= 6)("書き込みが拒否されたら版は上がらず、次に上げ直せる", async () => {
         server.rejects = (request) => "addSheet" in request;
         const { engine } = device();
         expect((await engine.sync()).status).toBe("failed");
@@ -330,7 +342,7 @@ describe("SheetsRemote", () => {
         expect(server.sheet("History").grid[0]?.[0]).toBe("id");
       });
 
-      it.skipIf(version === 6)("足すシートに規則と保護を掛け、番号が重なっても足せる", async () => {
+      it.skipIf(version >= 6)("足すシートに規則と保護を掛け、番号が重なっても足せる", async () => {
         server.sheets.push({ sheetId: 109, title: "家計簿", grid: [] });
         await device().engine.sync();
         const presence = server.sheet("ForgottenItems");
@@ -366,6 +378,34 @@ describe("SheetsRemote", () => {
         await b.engine.sync();
         expect(b.local.rows.forgottenItems.get("forget1")).toEqual(row);
       });
+
+      it("上げた後はリストのカテゴリを2端末で受け渡せる。共通のカテゴリの行はずれない", async () => {
+        const a = device();
+        await a.engine.sync();
+        const row = { id: "cat_shared-list1", name: "架空の売り場", sort: 1, updatedAt: T(0), listId: "list1" };
+        await a.local.commit([{ action: "put", table: "categories", row }]);
+        await a.engine.sync();
+        const grid = server.sheet("Categories").grid;
+        expect(grid[1]?.slice(0, 4)).toEqual(CATEGORY_V7);
+        expect(grid[2]).toEqual(["cat_shared-list1", "架空の売り場", 1, T(0), null, "list1"]);
+        const b = device();
+        await b.engine.sync();
+        expect(b.local.rows.categories.get("cat_shared-list1")).toEqual(row);
+        expect(b.local.rows.categories.get("cat_shared")?.listId).toBeNull();
+      });
+
+      it("上げた後に共通のカテゴリを墓石にしても、list_id の列には触らない", async () => {
+        const a = device();
+        await a.engine.sync();
+        await a.local.commit([{ action: "delete", table: "categories", id: "cat_shared", at: T(5) }]);
+        await a.engine.sync();
+        const row = server.sheet("Categories").grid[1];
+        expect(row?.[4]).toBe(T(5));
+        expect(row?.[5] ?? null).toBeNull();
+        const b = device();
+        await b.engine.sync();
+        expect(b.local.rows.categories.has("cat_shared")).toBe(false);
+      });
     });
 
     describe("版 3 から", () => {
@@ -380,13 +420,16 @@ describe("SheetsRemote", () => {
         const validations = server.requests.flatMap((r) =>
           r.setDataValidation && !added.has(r.setDataValidation.range.sheetId) ? [r.setDataValidation] : [],
         );
-        expect(validations).toHaveLength(1);
-        expect(validations[0]).toMatchObject({
-          range: { sheetId: stores, startColumnIndex: 7, endColumnIndex: 8 },
-          rule: { condition: { type: "ONE_OF_RANGE", values: [{ userEnteredValue: "=Lists!$A$2:$A" }] } },
-        });
+        const categories = server.sheet("Categories").sheetId;
+        const listPulldown = { condition: { type: "ONE_OF_RANGE", values: [{ userEnteredValue: "=Lists!$A$2:$A" }] } };
+        expect(validations).toHaveLength(2);
+        expect(validations).toMatchObject([
+          { range: { sheetId: categories, startColumnIndex: 5, endColumnIndex: 6 }, rule: listPulldown },
+          { range: { sheetId: stores, startColumnIndex: 7, endColumnIndex: 8 }, rule: listPulldown },
+        ]);
         const formats = server.requests.flatMap((r) => (r.repeatCell ? [r.repeatCell.range] : []));
-        expect(formats.filter((range) => range.sheetId === stores || range.sheetId === meta)).toEqual([
+        expect(formats.filter((range) => !added.has(range.sheetId))).toEqual([
+          expect.objectContaining({ sheetId: categories, startColumnIndex: 5 }),
           expect.objectContaining({ sheetId: stores, startColumnIndex: 7 }),
           expect.objectContaining({ sheetId: meta, startColumnIndex: 1 }),
         ]);
@@ -422,13 +465,42 @@ describe("SheetsRemote", () => {
       });
     });
 
-    it("版 6 からは版のセルだけを書く", async () => {
-      downgrade(6);
-      await device().engine.sync();
-      expect(server.count(":batchUpdate")).toBe(1);
-      expect(server.requests).toHaveLength(1);
-      expect(server.requests[0]?.updateCells?.rows).toBeDefined();
-      expect(server.sheet("Meta").grid[1]?.[0]).toBe(7);
+    describe.each([6, 7] as const)("版 %i から", (version) => {
+      beforeEach(() => downgrade(version));
+
+      it("Categories の list_id の列と版のセルだけを書く", async () => {
+        await device().engine.sync();
+        expect(server.count(":batchUpdate")).toBe(1);
+        const categories = server.sheet("Categories").sheetId;
+        // 列を広げる、見出し、文字の書式、プルダウン、版
+        expect(server.requests.map((r) => Object.keys(r)[0])).toEqual([
+          "updateSheetProperties",
+          "updateCells",
+          "repeatCell",
+          "setDataValidation",
+          "updateCells",
+        ]);
+        expect(server.requests[0]?.updateSheetProperties?.properties).toEqual({ sheetId: categories, gridProperties: { columnCount: 6 } });
+        expect(server.requests[3]?.setDataValidation?.range).toMatchObject({ sheetId: categories, startColumnIndex: 5, endColumnIndex: 6 });
+        expect(server.sheet("Meta").grid[1]?.[0]).toBe(8);
+      });
+
+      it("手で列を足した Categories の列の数を減らさない", async () => {
+        server.sheet("Categories").columnCount = 9;
+        await device().engine.sync();
+        expect(server.sheet("Categories").columnCount).toBe(9);
+        expect(server.sheet("Categories").grid[0]?.[5]).toBe("list_id");
+      });
+
+      it("Categories の足す列の場所が使われていれば、触らずに止める", async () => {
+        const categories = server.sheet("Categories");
+        categories.columnCount = 6;
+        categories.grid[0]?.push("メモ");
+        const result = await device().engine.sync();
+        expect(result.error?.kind).toBe("schema");
+        expect(server.count(":batchUpdate")).toBe(0);
+        expect(server.sheet("Meta").grid[1]).toEqual([version]);
+      });
     });
 
     it("版 4 の Meta の B 列が使われていれば、触らずに止める", async () => {
@@ -449,15 +521,16 @@ describe("SheetsRemote", () => {
     expect(result.error?.kind).toBe("schema");
   });
 
-  it("初期のカテゴリを取り込み、2端末で品目を受け渡す", async () => {
+  it("リストのカテゴリと品目を、2端末で受け渡す", async () => {
     const a = device();
     const b = device();
-    await a.local.commit([putItem(item("i1", T(1)))]);
+    const category = { id: "cat_seafood", name: "鮮魚", sort: 1, updatedAt: T(0), listId: "list1" };
+    await a.local.commit([{ action: "put", table: "categories", row: category }, putItem(item("i1", T(1)))]);
     await a.engine.sync();
     await b.engine.sync();
 
     expect(b.local.rows.items.get("i1")).toEqual(item("i1", T(1)));
-    expect(b.local.rows.categories.get("cat_seafood")?.name).toBe("鮮魚");
+    expect(b.local.rows.categories.get("cat_seafood")).toEqual(category);
     expect(b.local.rows.lists.size).toBe(1);
   });
 

@@ -1,7 +1,11 @@
 // 画面からの書き込み。すべて同期で SQLite に入れ、送信は同期が裏で行う
 import {
+  categoriesOfList,
+  initialCategories,
+  listCategoryId,
   lookupCategory,
   normalizeItemName,
+  rehomeHistory,
   storesForList,
   withoutForgotten,
   type Category,
@@ -35,8 +39,9 @@ export interface RepositoryDeps {
   store: SqliteLocalStore;
   newId: () => Id;
   now: () => Iso;
-  // 店舗の学んだ順番(向きの判定に使う)。店舗が無いときと学んでいないときは null
-  learnedOrder: (storeId: Id | null) => readonly Id[] | null;
+  // 店舗の学んだ順番(向きの判定に使う)。店舗が無いときと学んでいないときは null。
+  // listId は買い物のリストで、リストの決まっていない店舗のカテゴリを決める
+  learnedOrder: (storeId: Id | null, listId: Id) => readonly Id[] | null;
 }
 
 export type ItemPatch = Partial<Pick<Item, "name" | "categoryId" | "memo">>;
@@ -49,7 +54,7 @@ export class Repository {
   readonly #store: SqliteLocalStore;
   readonly #newId: () => Id;
   readonly #now: () => Iso;
-  readonly #learnedOrder: (storeId: Id | null) => readonly Id[] | null;
+  readonly #learnedOrder: (storeId: Id | null, listId: Id) => readonly Id[] | null;
 
   constructor(deps: RepositoryDeps) {
     this.#store = deps.store;
@@ -60,13 +65,18 @@ export class Repository {
 
   // --- リスト ---
 
+  // 初期のカテゴリ一式も同じコミットで足す(カテゴリのマスタはリストごと)。
   // dest は保存先。無ければ、スプレッドシートをつないでいればスプレッドシート、いなければアプリ内
   addList(name: string, dest?: Destination): Id {
     const id = this.#newId();
     const sort = nextSort(this.#store.rows("lists"));
-    this.#store.commitNow([{ action: "put", table: "lists", row: { id, name: name.trim(), sort, updatedAt: this.#now() } }], {
-      listDest: dest,
-    });
+    this.#store.commitNow(
+      [
+        { action: "put", table: "lists", row: { id, name: name.trim(), sort, updatedAt: this.#now() } },
+        ...initialCategories(id).map((row): LocalChange => ({ action: "put", table: "categories", row })),
+      ],
+      { listDest: dest },
+    );
     return id;
   }
 
@@ -82,7 +92,7 @@ export class Repository {
     this.#store.commitNow(
       [
         { action: "put", table: "lists", row: list },
-        ...this.#store.rows("categories").filter((row) => inList(row as { listId?: Id | null })).map((row): LocalChange => ({ action: "put", table: "categories", row })),
+        ...this.#store.rows("categories").filter(inList).map((row): LocalChange => ({ action: "put", table: "categories", row })),
         ...stores.map((row): LocalChange => ({ action: "put", table: "stores", row })),
         ...this.#store
           .rows("storeOrders")
@@ -101,9 +111,10 @@ export class Repository {
     if (list) this.#store.commitNow([{ action: "put", table: "lists", row: { ...list, name: name.trim(), updatedAt: this.#now() } }]);
   }
 
-  // 品目と、そのリストの店舗と手の順番、忘れた品目の記録も一緒に消す。History は足すだけなので残す
+  // 品目と、そのリストのカテゴリ、店舗と手の順番、忘れた品目の記録も一緒に消す。History は足すだけなので残す
   deleteList(id: Id): void {
     const at = this.#now();
+    const categories = categoriesOfList(this.#store.rows("categories"), id);
     const stores = new Set(this.#store.rows("stores").filter((store) => store.listId === id).map((store) => store.id));
     const items = this.#store.rows("items").filter((item) => item.listId === id);
     const forgotten = this.#store.rows("forgottenItems").filter((row) => row.listId === id);
@@ -111,6 +122,7 @@ export class Repository {
       ...this.#storeRemoval(stores, at),
       ...items.map((item): LocalChange => ({ action: "delete", table: "items", id: item.id, at })),
       ...forgotten.map((row): LocalChange => ({ action: "delete", table: "forgottenItems", id: row.id, at })),
+      ...categories.map((row): LocalChange => ({ action: "delete", table: "categories", id: row.id, at })),
       { action: "delete", table: "lists", id, at },
     ]);
     this.#forgetStores(stores);
@@ -125,9 +137,9 @@ export class Repository {
   }
 
   // どのリストにも属さない品目(野良品目)を足す。リスト一覧の「未整理」から、あとでリストへ移す。
-  // 同じ名前の野良品目があれば足さず、null を返す
-  addStrayItem(name: string, category: CategoryResolution): Item | null {
-    return this.#addItem(null, name, category);
+  // カテゴリはリストのものなので持たず、移したときに決める。同じ名前の野良品目があれば足さず、null を返す
+  addStrayItem(name: string): Item | null {
+    return this.#addItem(null, name, { categoryId: null, categorySource: null });
   }
 
   #openItemNamed(listId: Id | null, key: string): Item | undefined {
@@ -179,8 +191,8 @@ export class Repository {
   }
 
   // 野良品目をリストへ移し、移した先の品目を返す。移す先に同じ名前の買っていない品目があれば、
-  // 野良品目を消してそちらを返す(同じリストに同じ品目を2つ置かない)。利用者が決めたカテゴリでなければ、
-  // 移す先のリストの記録で引き直す(同じリストの記録がいちばん強い)。野良品目でない、リストが無いときは null
+  // 野良品目を消してそちらを返す(同じリストに同じ品目を2つ置かない)。カテゴリは移す先のリストの
+  // カテゴリで引き直し、分からなければ未分類にする(呼ぶ側が裏で推定する)。野良品目でない、リストが無いときは null
   moveStrayItem(id: Id, listId: Id): Item | null {
     const item = this.#item(id);
     if (!item || item.listId !== null || !this.#store.rows("lists").some((list) => list.id === listId)) return null;
@@ -190,17 +202,15 @@ export class Repository {
       this.#store.commitNow([{ action: "delete", table: "items", id, at }]);
       return existing;
     }
-    const resolved =
-      item.categorySource === "user"
-        ? null
-        : lookupCategory({
-            name: item.name,
-            listId,
-            categories: this.#store.rows("categories"),
-            items: this.#store.rows("items").filter((row) => row.id !== id),
-            history: withoutForgotten(this.#store.rows("history"), this.#store.rows("forgottenItems")),
-          });
-    const moved: Item = { ...item, ...(resolved?.categoryId ? resolved : {}), listId, updatedAt: at };
+    const categories = this.#store.rows("categories");
+    const resolved = lookupCategory({
+      name: item.name,
+      listId,
+      categories,
+      items: this.#store.rows("items").filter((row) => row.id !== id),
+      history: withoutForgotten(rehomeHistory(this.#store.rows("history"), categories), this.#store.rows("forgottenItems")),
+    });
+    const moved: Item = { ...item, ...resolved, listId, updatedAt: at };
     this.#store.commitNow([{ action: "put", table: "items", row: moved }]);
     return moved;
   }
@@ -240,7 +250,7 @@ export class Repository {
     const session = { ...(current ?? startSession(listId, now)), touchedAt: now };
     const checked: Item = { ...item, checked: true, checkedAt: now, checkedStoreId: session.storeId, checkedUpdatedAt: now };
     this.#store.commitNow([{ action: "put", table: "items", row: checked }]);
-    this.#saveSession(reviewDirection(session, this.#learnedOrder(session.storeId), this.#store.rows("items")));
+    this.#saveSession(reviewDirection(session, this.#learnedOrder(session.storeId, listId), this.#store.rows("items")));
     return first;
   }
 
@@ -301,7 +311,7 @@ export class Repository {
       checks.map((item): LocalChange => ({ action: "put", table: "items", row: { ...item, checkedStoreId: storeId, checkedUpdatedAt: now } })),
     );
     const next = { ...session, storeId, touchedAt: now };
-    this.#saveSession(reviewDirection(next, this.#learnedOrder(storeId), this.#store.rows("items")));
+    this.#saveSession(reviewDirection(next, this.#learnedOrder(storeId, listId), this.#store.rows("items")));
   }
 
   setDirection(listId: Id, direction: ListDirection): void {
@@ -338,6 +348,65 @@ export class Repository {
       .filter((row) => !lists.has(row.listId))
       .map((row): LocalChange => ({ action: "delete", table: "forgottenItems", id: row.id, at }));
     this.#store.commitNow(changes);
+    return changes.length;
+  }
+
+  // リストの無いカテゴリを墓石にする。リストを消す前にほかの端末が足した分は、消した端末からは
+  // 見えないので、同期のたびに片付ける。共通のカテゴリ(listId が null)は splitSharedCategories が
+  // 分けるので残す。消したカテゴリの数を返す
+  removeOrphanCategories(): number {
+    const lists = new Set(this.#store.rows("lists").map((list) => list.id));
+    const at = this.#now();
+    const changes = this.#store
+      .rows("categories")
+      .filter((row) => row.listId !== null && !lists.has(row.listId))
+      .map((row): LocalChange => ({ action: "delete", table: "categories", id: row.id, at }));
+    this.#store.commitNow(changes);
+    return changes.length;
+  }
+
+  // 版 7 までの共通のカテゴリ(listId が null)を、リストごとのカテゴリに分ける(docs/設計メモ.md の
+  // 「共通のカテゴリからの移行」)。同期でリストを読めた回に呼ぶ。することが無ければ書かない。変えた行の数を返す
+  splitSharedCategories(): number {
+    const categories = this.#store.rows("categories");
+    const lists = this.#store.rows("lists");
+    const items = this.#store.rows("items");
+    const at = this.#now();
+    // 野良品目はカテゴリを持たない
+    const changes: LocalChange[] = items
+      .filter((item) => item.listId === null && item.categoryId !== null)
+      .map((item) => ({ action: "put", table: "items", row: { ...item, categoryId: null, categorySource: null, updatedAt: at } }));
+
+    const shared = new Set(categoriesOfList(categories, null).map((row) => row.id));
+    // リストが1つも無いときは分ける先が無いので、共通のカテゴリを残す。リストができたときに分ける
+    if (shared.size > 0 && lists.length > 0) {
+      const known = new Set(categories.map((row) => row.id));
+      const listIds = new Set(lists.map((list) => list.id));
+      for (const category of categoriesOfList(categories, null)) {
+        for (const list of lists) {
+          // ID も中身も決まっているので、2台が同時に分けても同じ行になる。もうあれば足さない
+          // (新しいリストの初期のカテゴリと同じ ID で、そちらの名前や順を上書きしない)
+          const id = listCategoryId(category.id, list.id);
+          if (!known.has(id)) changes.push({ action: "put", table: "categories", row: { ...category, id, listId: list.id } });
+        }
+      }
+      for (const item of items) {
+        if (item.listId === null || item.categoryId === null || !listIds.has(item.listId) || !shared.has(item.categoryId)) continue;
+        changes.push({ action: "put", table: "items", row: { ...item, categoryId: listCategoryId(item.categoryId, item.listId), updatedAt: at } });
+      }
+      const storeLists = new Map(this.#store.rows("stores").map((store) => [store.id, store.listId]));
+      for (const order of this.#store.rows("storeOrders")) {
+        // リストの決まっていない店舗の手の順番は、読むときに読み替える(rehomeCategoryIds)
+        const listId = storeLists.get(order.storeId) ?? null;
+        if (listId === null || !listIds.has(listId) || !order.categoryIds.some((id) => shared.has(id))) continue;
+        const categoryIds = order.categoryIds.map((id) => (shared.has(id) ? listCategoryId(id, listId) : id));
+        // 手で並べ替えた時刻は学習の重みに効くので、今にしない。版として勝つよう 1ms だけ進める(2台で同じ行になる)
+        const editedAt = new Date(Date.parse(order.editedAt) + 1).toISOString();
+        changes.push({ action: "put", table: "storeOrders", row: { ...order, categoryIds, editedAt } });
+      }
+      for (const id of shared) changes.push({ action: "delete", table: "categories", id, at });
+    }
+    if (changes.length > 0) this.#store.commitNow(changes);
     return changes.length;
   }
 
@@ -457,10 +526,11 @@ export class Repository {
 
   // --- カテゴリ ---
 
-  addCategory(name: string): Id {
+  // そのリストのカテゴリの末尾に足す
+  addCategory(listId: Id, name: string): Id {
     const id = this.#newId();
-    const sort = nextSort(this.#store.rows("categories"));
-    this.#store.commitNow([{ action: "put", table: "categories", row: { id, name: name.trim(), sort, updatedAt: this.#now() } }]);
+    const sort = nextSort(categoriesOfList(this.#store.rows("categories"), listId));
+    this.#store.commitNow([{ action: "put", table: "categories", row: { id, name: name.trim(), sort, updatedAt: this.#now(), listId } }]);
     return id;
   }
 
@@ -469,9 +539,12 @@ export class Repository {
     if (category) this.#store.commitNow([{ action: "put", table: "categories", row: { ...category, name: name.trim(), updatedAt: this.#now() } }]);
   }
 
-  // 隣と sort を入れ替える
+  // 同じリストの隣と sort を入れ替える
   moveCategory(id: Id, offset: -1 | 1): void {
-    const categories: readonly Category[] = this.#store.rows("categories");
+    const all = this.#store.rows("categories");
+    const target = all.find((row) => row.id === id);
+    if (!target) return;
+    const categories: readonly Category[] = categoriesOfList(all, target.listId);
     const index = categories.findIndex((row) => row.id === id);
     const other = categories[index + offset];
     if (index < 0 || !other) return;

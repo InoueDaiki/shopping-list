@@ -1,8 +1,9 @@
+import { categoriesOfList } from "./listCategories.ts";
 import { normalizeItemName } from "./normalize.ts";
 import type { Category, CategorySource, HistoryEntry, Id, Item } from "./types.ts";
 
-// 品目名からマスタのカテゴリを1つ選ぶ。分からなければ null を返す。
-// 端末に依る実装は差し込む。返した ID がマスタに無ければ resolveCategory が捨てる
+// 品目名から、渡したカテゴリ(品目のリストのカテゴリ)の1つを選ぶ。分からなければ null を返す。
+// 端末に依る実装は差し込む。返した ID がそのリストに無ければ resolveCategory が捨てる
 export interface CategoryInferrer {
   infer(name: string, categories: readonly Category[]): Promise<Id | null>;
 }
@@ -15,8 +16,9 @@ export interface CategoryResolution {
 
 export interface CategoryLookupInput {
   name: string;
-  // null はどのリストにも属さない品目(野良品目)。どの記録も「ほかのリスト」として見る
-  listId: Id | null;
+  // 品目のリスト。野良品目(どのリストにも属さない品目)はカテゴリを持たないので、引かない
+  listId: Id;
+  // すべてのリストのカテゴリ。ほかのリストの記録を、カテゴリの名前でこのリストへ引き当てる
   categories: readonly Category[];
   items: readonly Item[];
   history: readonly HistoryEntry[];
@@ -47,11 +49,25 @@ function isStronger(a: CategoryRecord, b: CategoryRecord): boolean {
 }
 
 // 過去の品目から同期的に引く。品目を追加するときは待たせないよう、まずこれを使う。
-// 同じリストの記録はほかのリストより強く、同じ側の中では利用者の修正がいちばん強い
+// 同じリストの記録はほかのリストより強く、同じ側の中では利用者の修正がいちばん強い。
+// カテゴリはリストごとなので、同じリストの記録は ID のまま使い、ほかのリストの記録は、
+// 同じ名前のカテゴリがこのリストにあるときだけ、このリストのカテゴリとして使う
 export function lookupCategory(input: CategoryLookupInput): CategoryResolution {
   const target = normalizeItemName(input.name);
   if (target === "") return UNCATEGORIZED;
-  const known = new Set(input.categories.map((category) => category.id));
+  const own = categoriesOfList(input.categories, input.listId);
+  const known = new Set(own.map((category) => category.id));
+  // 名前の重なったカテゴリは、マスタの順で先のものにする
+  const ownByName = new Map<string, Id>();
+  for (const category of own) {
+    const key = normalizeItemName(category.name);
+    if (!ownByName.has(key)) ownByName.set(key, category.id);
+  }
+  const nameOf = new Map(input.categories.map((category) => [category.id, normalizeItemName(category.name)]));
+  const ownCategory = (categoryId: Id, sameList: boolean): Id | null => {
+    if (sameList) return known.has(categoryId) ? categoryId : null;
+    return ownByName.get(nameOf.get(categoryId) ?? "") ?? null;
+  };
 
   const records = [
     ...input.items.map((item) => ({
@@ -68,13 +84,16 @@ export function lookupCategory(input: CategoryLookupInput): CategoryResolution {
 
   let best: CategoryRecord | null = null;
   for (const record of records) {
-    // 未分類の記録と、マスタから消えたカテゴリの記録は手がかりにならない
-    if (record.categoryId === null || !known.has(record.categoryId)) continue;
-    if (normalizeItemName(record.name) !== target) continue;
+    if (record.categoryId === null || normalizeItemName(record.name) !== target) continue;
+    const sameList = record.listId === input.listId;
+    // 未分類の記録と、マスタから消えたカテゴリの記録と、このリストに同じ名前のカテゴリが無い
+    // ほかのリストの記録は、手がかりにならない
+    const categoryId = ownCategory(record.categoryId, sameList);
+    if (categoryId === null) continue;
     const candidate: CategoryRecord = {
       id: record.id,
-      categoryId: record.categoryId,
-      sameList: input.listId !== null && record.listId === input.listId,
+      categoryId,
+      sameList,
       strength: SOURCE_STRENGTH[record.source ?? "none"],
       at: Date.parse(record.at),
     };
@@ -87,19 +106,20 @@ export function lookupCategory(input: CategoryLookupInput): CategoryResolution {
   return { categoryId: best.categoryId, categorySource };
 }
 
-// 同じリスト、ほかのリスト、推定、未分類の順で決める。
+// 同じリスト、ほかのリスト、推定、未分類の順で決める。推定はそのリストのカテゴリを相手にする。
 // 推定の失敗は未分類として扱い、品目の追加を止めない
 export async function resolveCategory(input: ResolveCategoryInput): Promise<CategoryResolution> {
   const resolved = lookupCategory(input);
   if (resolved.categoryId !== null || !input.inferrer) return resolved;
   if (normalizeItemName(input.name) === "") return UNCATEGORIZED;
 
+  const own = categoriesOfList(input.categories, input.listId);
   let inferred: Id | null;
   try {
-    inferred = await input.inferrer.infer(input.name, input.categories);
+    inferred = await input.inferrer.infer(input.name, own);
   } catch {
     return UNCATEGORIZED;
   }
-  const isKnown = input.categories.some((category) => category.id === inferred);
+  const isKnown = own.some((category) => category.id === inferred);
   return isKnown ? { categoryId: inferred, categorySource: "inferred" } : UNCATEGORIZED;
 }

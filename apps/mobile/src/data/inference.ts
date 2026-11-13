@@ -1,29 +1,53 @@
 // 品目のカテゴリの推定を裏で走らせる。結果が出たら品目へ入れ、失敗したら未分類のままにする
-import { createCategoryInferrer, prepareCategoryInference, resolveCategory, type Item } from "@shopping-list/core";
+import {
+  createCategoryInferrer,
+  prepareCategoryInference,
+  resolveCategory,
+  type CategoryInferrer,
+  type HistoryEntry,
+  type Id,
+  type Item,
+} from "@shopping-list/core";
 
 import { localStore, rememberedHistory, repository } from "./runtime.ts";
 
-// 忘れた品目名は学習に使わない
-const inferrer = createCategoryInferrer(rememberedHistory);
+// カテゴリはリストごとなので、履歴の学習もリストごとに持つ。忘れた品目名は学習に使わない。
+// 履歴が変わるまで同じ配列を渡すので、モデルは参照が変わったときだけ作り直される
+const inferrers = new Map<Id, CategoryInferrer>();
 
-async function inferAndApply(item: Item): Promise<void> {
+function inferrerFor(listId: Id): CategoryInferrer {
+  let inferrer = inferrers.get(listId);
+  if (!inferrer) {
+    let held: { source: readonly HistoryEntry[]; rows: readonly HistoryEntry[] } | null = null;
+    inferrer = createCategoryInferrer(() => {
+      const source = rememberedHistory();
+      if (held?.source !== source) held = { source, rows: source.filter((entry) => entry.listId === listId) };
+      return held.rows;
+    });
+    inferrers.set(listId, inferrer);
+  }
+  return inferrer;
+}
+
+async function inferAndApply(item: Item, listId: Id): Promise<void> {
   // 追加の操作の描画を先に済ませる
   await new Promise((resolve) => setTimeout(resolve, 0));
   const { categoryId } = await resolveCategory({
     name: item.name,
-    listId: item.listId,
+    listId,
     categories: localStore.rows("categories"),
     items: localStore.rows("items"),
     history: rememberedHistory(),
-    inferrer,
+    inferrer: inferrerFor(listId),
   });
   if (categoryId !== null) repository.applyInferredCategory(item.id, categoryId);
 }
 
-// 未分類の品目を受けて投げっぱなしで推定する。呼ぶ側を待たせず、例外も外へ出さない
+// 未分類の品目を受けて投げっぱなしで推定する。呼ぶ側を待たせず、例外も外へ出さない。
+// 野良品目はカテゴリを持たないので推定しない(リストへ移したときに推定する)
 export function inferItemCategory(item: Item): void {
-  if (item.categoryId !== null) return;
-  inferAndApply(item).catch(() => undefined);
+  if (item.categoryId !== null || item.listId === null) return;
+  inferAndApply(item, item.listId).catch(() => undefined);
 }
 
 // 入力欄に触れたら、キーボードが出終わるのを待って辞書の表を作っておく。打ち終わるまでに済み、
