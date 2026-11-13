@@ -15,11 +15,12 @@ import { config } from "../config.ts";
 import { accountCheck, ownerValue } from "../logic/account.ts";
 import { PEEK_READ_RESERVE } from "../logic/liveSync.ts";
 import { seedDemo } from "./demo.ts";
+import type { Destination } from "./destination.ts";
 import { openDatabase } from "./expoDb.ts";
 import { newId } from "./ids.ts";
 import { SqliteLocalStore } from "./localStore.ts";
 import { OrderCache } from "./ordering.ts";
-import { Repository } from "./repository.ts";
+import { Repository, SESSION_KEY } from "./repository.ts";
 import { sheetTokenProvider } from "./sheetToken.ts";
 import type { SheetRef } from "./spreadsheet.ts";
 import { SyncRunner } from "./syncRunner.ts";
@@ -36,9 +37,16 @@ const DEVICE_KEY = "deviceId";
 
 const nowIso = () => new Date().toISOString();
 
+// スプレッドシートをつないでいるか。デモモードはつながない
+function sheetsConnected(): boolean {
+  return !config.demo && localStore.setting(SHEET_KEY) !== null;
+}
+
 // デモの端末で本物の写しを壊さないよう、ファイルも分ける
-export const localStore = new SqliteLocalStore(openDatabase(config.demo ? "demo.db" : "shopping.db"), {
+export const localStore: SqliteLocalStore = new SqliteLocalStore(openDatabase(config.demo ? "demo.db" : "shopping.db"), {
   recordPending: !config.demo,
+  // 野良品目など、親の無い行の保存先
+  defaultDest: (): Destination => (sheetsConnected() ? "sheets" : "local"),
 });
 
 const orders = new OrderCache();
@@ -203,18 +211,19 @@ export const sheetDraftStore = {
   save: (value: string | null) => localStore.setSetting(SHEET_DRAFT_KEY, value),
 };
 
-// シートを替えても残す設定。端末の ID は替えると在室の行が増えるので残す
+// シートを替えても残す設定。買い物の状態は、アプリ内のリストのものかもしれないので残す
+// (消えたリストのものなら、開くリストと合わないので無視される)。端末の ID は替えると在室の行が増えるので残す
 function keptSettings(): Record<string, string> {
   const kept: Record<string, string> = {};
-  for (const key of [OWNER_KEY, DEVICE_KEY]) {
+  for (const key of [OWNER_KEY, DEVICE_KEY, SESSION_KEY]) {
     const value = localStore.setting(key);
     if (value !== null) kept[key] = value;
   }
   return kept;
 }
 
-// シートを決める、または替える。task(シートを開く、作る)が返したシートへ、端末の写しを捨ててから
-// 読み直す(送信待ちも消える)。null ならそのまま。通信の間は書き込みを受け付けない
+// シートを決める、または替える。task(シートを開く、作る)が返したシートへ、前のシートの写しを捨ててから
+// 読み直す(送信待ちも消える。アプリ内のリストは残る)。null ならそのまま。通信の間は書き込みを受け付けない
 export function switchSheet(task: () => Promise<SheetRef | null>): Promise<boolean> {
   return localStore.whileWritesLocked(async () => {
     const sheet = await task();
@@ -230,16 +239,27 @@ export function adoptAccount(email: string | undefined): void {
   localStore.setSetting(OWNER_KEY, ownerValue(email));
 }
 
-// 別のアカウントの写しを捨てて、今のアカウントのものにする(送信待ちも消える)。招待は残す
+// 端末だけの設定のうち、スプレッドシートの写しを捨てても残すもの
+function localSettings(): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const key of [DEVICE_KEY, SESSION_KEY]) {
+    const value = localStore.setting(key);
+    if (value !== null) kept[key] = value;
+  }
+  return kept;
+}
+
+// 別のアカウントの写しを捨てて、今のアカウントのものにする(送信待ちも消える)。招待とアプリ内のリストは残す
 export async function replaceLocalCopy(email: string | undefined): Promise<void> {
   const invite = localStore.setting(INVITE_KEY);
   await syncRunner.pause(() =>
-    localStore.wipe({ [OWNER_KEY]: ownerValue(email), ...(invite === null ? {} : { [INVITE_KEY]: invite }) }),
+    localStore.wipe({ ...localSettings(), [OWNER_KEY]: ownerValue(email), ...(invite === null ? {} : { [INVITE_KEY]: invite }) }),
   );
 }
 
-// ログアウトする。次の人に写しを残さない。送信待ちも消えるので、画面が先に確かめる
+// ログアウトする。次の人にスプレッドシートの写しを残さない。送信待ちも消えるので、画面が先に確かめる。
+// アプリ内のリストはログインと関係が無いので残す
 export async function signOutAndWipe(): Promise<void> {
   await signOut();
-  await syncRunner.pause(() => localStore.wipe());
+  await syncRunner.pause(() => localStore.wipe(localSettings()));
 }

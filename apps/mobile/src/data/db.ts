@@ -91,6 +91,20 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE items_next RENAME TO items;
     `,
   },
+  {
+    // 保存先(docs/設計メモ.md の「保存先」)。端末だけの列で、シートには送らない。
+    // これまでの行はすべてスプレッドシートの写し
+    version: 6,
+    sql: `
+      ALTER TABLE lists ADD COLUMN dest TEXT NOT NULL DEFAULT 'sheets';
+      ALTER TABLE categories ADD COLUMN dest TEXT NOT NULL DEFAULT 'sheets';
+      ALTER TABLE stores ADD COLUMN dest TEXT NOT NULL DEFAULT 'sheets';
+      ALTER TABLE items ADD COLUMN dest TEXT NOT NULL DEFAULT 'sheets';
+      ALTER TABLE store_orders ADD COLUMN dest TEXT NOT NULL DEFAULT 'sheets';
+      ALTER TABLE forgotten_items ADD COLUMN dest TEXT NOT NULL DEFAULT 'sheets';
+      ALTER TABLE history ADD COLUMN dest TEXT NOT NULL DEFAULT 'sheets';
+    `,
+  },
 ];
 
 export function migrate(db: Database): void {

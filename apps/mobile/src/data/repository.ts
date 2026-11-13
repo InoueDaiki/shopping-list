@@ -15,6 +15,7 @@ import {
   type Store,
 } from "@shopping-list/core";
 
+import type { Destination } from "./destination.ts";
 import type { SqliteLocalStore } from "./localStore.ts";
 import {
   activeSession,
@@ -59,11 +60,40 @@ export class Repository {
 
   // --- リスト ---
 
-  addList(name: string): Id {
+  // dest は保存先。無ければ、スプレッドシートをつないでいればスプレッドシート、いなければアプリ内
+  addList(name: string, dest?: Destination): Id {
     const id = this.#newId();
     const sort = nextSort(this.#store.rows("lists"));
-    this.#store.commitNow([{ action: "put", table: "lists", row: { id, name: name.trim(), sort, updatedAt: this.#now() } }]);
+    this.#store.commitNow([{ action: "put", table: "lists", row: { id, name: name.trim(), sort, updatedAt: this.#now() } }], {
+      listDest: dest,
+    });
     return id;
+  }
+
+  // リストの保存先を変える。リストと、リストに属する行(カテゴリ、店舗と手の順番、品目、忘れた品目、履歴)を、
+  // 中身はそのままで書き直す。行の保存先は親から決まるので、リスト、店舗、手の順番の順に書く。
+  // 移す先への送信とシートの行の片付けは、ローカルの写しが送信待ちに積む
+  moveList(id: Id, dest: Destination): void {
+    const list = this.#store.rows("lists").find((row) => row.id === id);
+    if (!list || this.#store.listDestinations().get(id) === dest) return;
+    const inList = (row: { listId?: Id | null }) => row.listId === id;
+    const stores = this.#store.rows("stores").filter(inList);
+    const storeIds = new Set(stores.map((store) => store.id));
+    this.#store.commitNow(
+      [
+        { action: "put", table: "lists", row: list },
+        ...this.#store.rows("categories").filter((row) => inList(row as { listId?: Id | null })).map((row): LocalChange => ({ action: "put", table: "categories", row })),
+        ...stores.map((row): LocalChange => ({ action: "put", table: "stores", row })),
+        ...this.#store
+          .rows("storeOrders")
+          .filter((row) => storeIds.has(row.storeId))
+          .map((row): LocalChange => ({ action: "put", table: "storeOrders", row })),
+        ...this.#store.rows("items").filter(inList).map((row): LocalChange => ({ action: "put", table: "items", row })),
+        ...this.#store.rows("forgottenItems").filter(inList).map((row): LocalChange => ({ action: "put", table: "forgottenItems", row })),
+        ...this.#store.rows("history").filter(inList).map((row): LocalChange => ({ action: "put", table: "history", row })),
+      ],
+      { listDest: dest },
+    );
   }
 
   renameList(id: Id, name: string): void {
@@ -387,7 +417,12 @@ export class Repository {
   updateStore(id: Id, patch: Partial<Pick<Store, "name" | "lat" | "lng" | "listId">>): void {
     const store = this.#store.rows("stores").find((row) => row.id === id);
     if (!store) return;
-    this.#store.commitNow([{ action: "put", table: "stores", row: { ...store, ...patch, updatedAt: this.#now() } }]);
+    // 手の順番は店舗と同じ保存先に置く。別の保存先のリストへ移したときに付いていくよう、一緒に書き直す
+    const order = patch.listId ? this.#store.rows("storeOrders").find((row) => row.storeId === id) : undefined;
+    this.#store.commitNow([
+      { action: "put", table: "stores", row: { ...store, ...patch, updatedAt: this.#now() } },
+      ...(order ? [{ action: "put", table: "storeOrders", row: order } satisfies LocalChange] : []),
+    ]);
     // 別のリストへ移した店舗を、前のリストの買い物に残さない
     const session = this.session();
     if (patch.listId && session?.storeId === id && session.listId !== patch.listId) this.#forgetStores(new Set([id]));

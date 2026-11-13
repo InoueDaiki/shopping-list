@@ -1,5 +1,6 @@
 // core の LocalStore の SQLite の実装。画面の読み取りもここを通る。
-// 読み取りは表ごとに配列をキャッシュし、変わるまで同じ配列を返す(useSyncExternalStore にそのまま渡せる)
+// 読み取りは表ごとに配列をキャッシュし、変わるまで同じ配列を返す(useSyncExternalStore にそのまま渡せる)。
+// 行ごとに保存先(dest)を持ち、スプレッドシートの行の変更だけを送信待ちに積む(docs/設計メモ.md の「保存先」)
 import {
   changeId,
   rowId,
@@ -23,6 +24,7 @@ import {
 } from "@shopping-list/core";
 
 import { type Database, migrate, type SqlValue } from "./db.ts";
+import type { Destination } from "./destination.ts";
 
 type Row = Record<string, SqlValue>;
 
@@ -177,10 +179,14 @@ function tableDef(table: SyncTable): TableDef<unknown> {
   return TABLES[table] as unknown as TableDef<unknown>;
 }
 
+// 値は columns の順の後ろに、保存先を足して渡す
 function putSql(def: TableDef<unknown>, verb: "INSERT OR REPLACE" | "INSERT OR IGNORE"): string {
   const marks = def.columns.map(() => "?").join(", ");
-  return `${verb} INTO ${def.name} (${def.columns.join(", ")}) VALUES (${marks})`;
+  return `${verb} INTO ${def.name} (${def.columns.join(", ")}, dest) VALUES (${marks}, ?)`;
 }
+
+// リストに属する表。行の保存先はリストの保存先に合わせる
+const LIST_CHILD_TABLES: ReadonlySet<SyncTable> = new Set(["categories", "stores", "items", "forgottenItems", "history"]);
 
 function sameRow(a: object, b: object): boolean {
   const right = b as Record<string, unknown>;
@@ -204,11 +210,24 @@ const HISTORY_CURSOR_KEY = "historyCursor";
 export interface SqliteLocalStoreOptions {
   // false なら送信待ちを積まない(デモモード。送り先が無い)
   recordPending?: boolean;
+  // 親の無い新しい行(野良品目など)と、保存先を指定しない新しいリストの保存先。
+  // スプレッドシートをつないでいれば sheets、いなければ local を返す。無ければ sheets
+  defaultDest?: () => Destination;
+  // 保存先を移すときの、シートの行を消す時刻。無ければ今
+  now?: () => string;
+}
+
+export interface CommitOptions {
+  // 変更の中のリストの保存先。新しいリストを作るときと、リストの保存先を移すときに渡す
+  listDest?: Destination;
 }
 
 export class SqliteLocalStore implements LocalStore {
   readonly #db: Database;
   readonly #recordPending: boolean;
+  readonly #defaultDest: () => Destination;
+  readonly #now: () => string;
+  #listDests: ReadonlyMap<Id, Destination> | null = null;
   readonly #rows = new Map<SyncTable, unknown[]>();
   // 変更で捨てた配列。次に読むときに、変わらなかった行を引き継ぐ
   readonly #staleRows = new Map<SyncTable, unknown[]>();
@@ -220,6 +239,8 @@ export class SqliteLocalStore implements LocalStore {
   constructor(db: Database, options: SqliteLocalStoreOptions = {}) {
     this.#db = db;
     this.#recordPending = options.recordPending ?? true;
+    this.#defaultDest = options.defaultDest ?? (() => "sheets");
+    this.#now = options.now ?? (() => new Date().toISOString());
     migrate(db);
   }
 
@@ -236,6 +257,14 @@ export class SqliteLocalStore implements LocalStore {
     this.#rows.set(table, rows);
     return rows as TableRows[T][];
   }
+
+  // リストごとの保存先。リストの表が変わるまで同じ Map を返す
+  listDestinations = (): ReadonlyMap<Id, Destination> => {
+    this.#listDests ??= new Map(
+      this.#db.all<{ id: Id; dest: Destination }>("SELECT id, dest FROM lists").map((row) => [row.id, row.dest]),
+    );
+    return this.#listDests;
+  };
 
   pendingCountNow(): number {
     this.#pendingCount ??= this.#db.all<{ n: number }>("SELECT COUNT(*) AS n FROM pending_ops")[0]?.n ?? 0;
@@ -272,6 +301,7 @@ export class SqliteLocalStore implements LocalStore {
       if (topic === "pending") this.#pendingCount = null;
       else if (topic === "settings") this.#settings = null;
       else if (topic !== "writesLocked") {
+        if (topic === "lists") this.#listDests = null;
         const cached = this.#rows.get(topic);
         if (cached) this.#staleRows.set(topic, cached);
         this.#rows.delete(topic);
@@ -282,11 +312,11 @@ export class SqliteLocalStore implements LocalStore {
     }
   }
 
-  // シートを替えるとき、ログアウトのときに全部を消す。settings は消したあとに入れる設定で、
-  // 同じトランザクションに入れる(シートが無い状態を画面に見せない)
+  // シートを替えるとき、ログアウトのときに、スプレッドシートの写しと送信待ちを消す。アプリ内の行は残す。
+  // settings は消したあとに入れる設定で、同じトランザクションに入れる(シートが無い状態を画面に見せない)
   wipe(settings: Readonly<Record<string, string>> = {}): void {
     this.#db.transaction(() => {
-      for (const table of ALL_TABLES) this.#db.run(`DELETE FROM ${TABLES[table].name}`);
+      for (const table of ALL_TABLES) this.#db.run(`DELETE FROM ${TABLES[table].name} WHERE dest = 'sheets'`);
       this.#db.run("DELETE FROM pending_ops");
       this.#db.run("DELETE FROM settings");
       for (const [key, value] of Object.entries(settings)) {
@@ -318,29 +348,60 @@ export class SqliteLocalStore implements LocalStore {
     }
   }
 
-  // 同期で書く。画面は await せず、次の描画から新しい値が見える
-  commitNow(changes: LocalChange[]): void {
+  // 同期で書く。画面は await せず、次の描画から新しい値が見える。
+  // 行の保存先は親(リスト、手の順番は店舗)から決め、スプレッドシートの行の変更だけを送信待ちに積む。
+  // 今の保存先と違えば移す。スプレッドシートへは行を足す操作を、アプリ内へはシートの行を消す操作を積む
+  commitNow(changes: LocalChange[], options: CommitOptions = {}): void {
     if (changes.length === 0 || this.#writesLocked) return;
+    let queued = false;
     this.#db.transaction(() => {
+      const enqueue = (change: LocalChange) => {
+        if (!this.#recordPending) return;
+        this.#db.run("INSERT INTO pending_ops (table_name, row_id, change) VALUES (?, ?, ?)", [
+          change.table,
+          changeId(change),
+          JSON.stringify(change),
+        ]);
+        queued = true;
+      };
       for (const change of changes) {
         const def = tableDef(change.table);
-        if (change.action === "put") {
-          this.#db.run(putSql(def, "INSERT OR REPLACE"), def.encode(change.row));
-        } else {
-          this.#db.run(`DELETE FROM ${def.name} WHERE ${def.key} = ?`, [change.id]);
+        const id = changeId(change);
+        const current = this.#destOf(def.name, def.key, id);
+        if (change.action === "delete") {
+          this.#db.run(`DELETE FROM ${def.name} WHERE ${def.key} = ?`, [id]);
+          if ((current ?? this.#defaultDest()) === "sheets") enqueue(change);
+          continue;
         }
-        if (this.#recordPending) {
-          this.#db.run("INSERT INTO pending_ops (table_name, row_id, change) VALUES (?, ?, ?)", [
-            change.table,
-            changeId(change),
-            JSON.stringify(change),
-          ]);
+        const dest = this.#destFor(change, current, options);
+        this.#db.run(putSql(def, "INSERT OR REPLACE"), [...def.encode(change.row), dest]);
+        if (dest === "sheets") enqueue(change);
+        // History は足すだけで消せないので、シートに残す
+        else if (current === "sheets" && change.table !== "history") {
+          enqueue({ action: "delete", table: change.table, id, at: this.#now() });
         }
       }
     });
     const topics = new Set<StoreTopic>(changes.map((change) => change.table));
-    if (this.#recordPending) topics.add("pending");
+    if (queued) topics.add("pending");
     this.#notify(topics);
+  }
+
+  #destOf(table: string, key: string, id: Id): Destination | null {
+    return this.#db.all<{ dest: Destination }>(`SELECT dest FROM ${table} WHERE ${key} = ?`, [id])[0]?.dest ?? null;
+  }
+
+  // 書く行の保存先。親があれば親の保存先、無ければ今の保存先、新しい行は既定の保存先
+  #destFor(change: RowOf, current: Destination | null, options: CommitOptions): Destination {
+    if (change.table === "lists") return options.listDest ?? current ?? this.#defaultDest();
+    let parent: Destination | null = null;
+    if (change.table === "storeOrders") {
+      parent = this.#destOf("stores", "id", change.row.storeId);
+    } else if (LIST_CHILD_TABLES.has(change.table)) {
+      const { listId } = change.row as { listId?: Id | null };
+      if (typeof listId === "string") parent = this.#destOf("lists", "id", listId);
+    }
+    return parent ?? current ?? this.#defaultDest();
   }
 
   pendingOps(limit: number): Promise<PendingOp[]> {
@@ -384,7 +445,8 @@ export class SqliteLocalStore implements LocalStore {
       const history = tableDef("history");
       for (const entry of input.history) {
         // 足すだけの表なので、同じ ID は同じ内容。2台が同じトリップを移しても ID で重なる
-        if (this.#db.run(putSql(history, "INSERT OR IGNORE"), history.encode(entry)) > 0) changed.add("history");
+        // アプリ内へ移したリストの履歴はシートに残っている。同じ ID なので、そのまま無視される
+        if (this.#db.run(putSql(history, "INSERT OR IGNORE"), [...history.encode(entry), "sheets"]) > 0) changed.add("history");
       }
       this.#db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [
         HISTORY_CURSOR_KEY,
@@ -400,16 +462,23 @@ export class SqliteLocalStore implements LocalStore {
   #applyTable(table: MutableTable, input: RemoteApply, pending: ReadonlySet<string>): boolean {
     const def = tableDef(table);
     const isPending = (id: Id) => pending.has(`${table}\0${id}`);
-    const current = new Map(
-      this.#db.all<Row>(`SELECT * FROM ${def.name}`).map((row) => [row[def.key] as Id, def.decode(row)]),
-    );
+    // 比べる相手はスプレッドシートの行だけ。シートに無いからといって、アプリ内の行を消さない
+    const current = new Map<Id, unknown>();
+    const local = new Set<Id>();
+    for (const row of this.#db.all<Row>(`SELECT * FROM ${def.name}`)) {
+      if (row.dest === "sheets") current.set(row[def.key] as Id, def.decode(row));
+      else local.add(row[def.key] as Id);
+    }
     const seen = new Set<Id>(input.keep[table] ?? []);
     let changed = false;
     for (const row of input.tables[table]) {
       const id = table === "storeOrders" ? (row as StoreOrder).storeId : (row as { id: Id }).id;
       seen.add(id);
+      // アプリ内へ移した行が、まだシートに残っている(消す操作を送る前、相手の古い編集で生き返った)。
+      // アプリ内の行を正とする
+      if (local.has(id)) continue;
       if (isPending(id) || JSON.stringify(current.get(id)) === JSON.stringify(row)) continue;
-      this.#db.run(putSql(def, "INSERT OR REPLACE"), def.encode(row));
+      this.#db.run(putSql(def, "INSERT OR REPLACE"), [...def.encode(row), "sheets"]);
       changed = true;
     }
     for (const id of current.keys()) {

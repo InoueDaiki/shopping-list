@@ -754,3 +754,119 @@ describe("Repository", () => {
     });
   });
 });
+
+describe("リストの保存先", () => {
+  let store: SqliteLocalStore;
+  let repo: Repository;
+  let remote: MemoryRemoteStore;
+  let engine: SyncEngine;
+  let clock: number;
+  let next: number;
+
+  beforeEach(() => {
+    clock = START;
+    next = 0;
+    const now = () => new Date(clock).toISOString();
+    store = new SqliteLocalStore(openTestDatabase(), { now });
+    repo = new Repository({ store, newId: () => `id-${++next}`, now, learnedOrder: () => null });
+    remote = new MemoryRemoteStore();
+    engine = new SyncEngine({ local: store, remote });
+  });
+
+  // シートの生きている行(墓石を除く)
+  const live = async () => (await remote.pull(null)).tables;
+
+  // 店舗と手の順番、品目、忘れた品目、履歴のあるリストを作る
+  function fill(listId: Id): void {
+    const storeId = repo.addStore(listId, "架空の店", null);
+    repo.saveStoreOrder(storeId, ["a", "b"]);
+    const bought = repo.addItem(listId, "架空の買った品物", NONE)!;
+    repo.addItem(listId, "架空の品物", NONE);
+    repo.selectStore(listId, storeId);
+    repo.checkItem(bought.id);
+    clock += TRIP_GAP_MS + 1;
+    repo.finishTrips();
+    repo.forgetItemName(listId, "架空の買った品物");
+  }
+
+  it("アプリ内のリストは送らず、同期しても消えない", async () => {
+    const listId = repo.addList("架空のリスト", "local");
+    fill(listId);
+    expect(store.pendingCountNow()).toBe(0);
+    await engine.sync();
+    expect(remote.rows.lists).toEqual([]);
+    expect(store.rows("lists")).toHaveLength(1);
+    expect(store.rows("items")).toHaveLength(1);
+    expect(store.rows("history")).toHaveLength(1);
+  });
+
+  it("スプレッドシートへ移すと、リストに属する行をすべて送る", async () => {
+    const listId = repo.addList("架空のリスト", "local");
+    fill(listId);
+    repo.moveList(listId, "sheets");
+    expect(store.listDestinations().get(listId)).toBe("sheets");
+    await engine.sync();
+    expect(store.pendingCountNow()).toBe(0);
+    expect(remote.rows.lists).toHaveLength(1);
+    expect(remote.rows.stores).toHaveLength(1);
+    expect(remote.rows.storeOrders).toHaveLength(1);
+    expect(remote.rows.items).toHaveLength(1);
+    expect(remote.rows.forgottenItems).toHaveLength(1);
+    expect(remote.rows.history).toHaveLength(1);
+    // 移した後の変更は送る
+    repo.addItem(listId, "架空の新しい品物", NONE);
+    expect(store.pendingCountNow()).toBe(1);
+  });
+
+  it("アプリ内へ移すと、端末の行を残してシートの行を消す", async () => {
+    const listId = repo.addList("架空のリスト", "sheets");
+    fill(listId);
+    await engine.sync();
+    const before = { items: store.rows("items"), stores: store.rows("stores"), history: store.rows("history") };
+    clock += 1000;
+    repo.moveList(listId, "local");
+    await engine.sync();
+    expect(store.pendingCountNow()).toBe(0);
+    expect(await live()).toEqual({ lists: [], categories: [], stores: [], items: [], storeOrders: [], forgottenItems: [] });
+    // History は足すだけなので、シートに残る
+    expect(remote.rows.history).toHaveLength(1);
+    expect(store.rows("lists")).toHaveLength(1);
+    expect(store.rows("items")).toEqual(before.items);
+    expect(store.rows("stores")).toEqual(before.stores);
+    expect(store.rows("history")).toEqual(before.history);
+    // 移した後の変更は送らない
+    repo.addItem(listId, "架空の新しい品物", NONE);
+    expect(store.pendingCountNow()).toBe(0);
+  });
+
+  it("同じ保存先へは何もしない", () => {
+    const listId = repo.addList("架空のリスト", "local");
+    repo.moveList(listId, "local");
+    expect(store.pendingCountNow()).toBe(0);
+  });
+
+  it("野良品目をリストへ移すと、そのリストの保存先へ移る", async () => {
+    const listId = repo.addList("架空のリスト", "local");
+    const stray = repo.addStrayItem("架空の品物", NONE)!;
+    await engine.sync();
+    expect(remote.rows.items).toHaveLength(1);
+    clock += 1000;
+    repo.moveStrayItem(stray.id, listId);
+    await engine.sync();
+    expect((await live()).items).toEqual([]);
+    expect(store.rows("items")).toMatchObject([{ id: stray.id, listId }]);
+  });
+
+  it("店舗を別の保存先のリストへ移すと、手の順番も付いていく", async () => {
+    const shared = repo.addList("架空の共有リスト", "sheets");
+    const own = repo.addList("架空のリスト", "local");
+    const storeId = repo.addStore(shared, "架空の店", null);
+    repo.saveStoreOrder(storeId, ["a"]);
+    await engine.sync();
+    clock += 1000;
+    repo.updateStore(storeId, { listId: own });
+    await engine.sync();
+    expect(await live()).toMatchObject({ stores: [], storeOrders: [] });
+    expect(store.rows("storeOrders")).toHaveLength(1);
+  });
+});
