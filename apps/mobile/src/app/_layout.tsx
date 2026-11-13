@@ -1,5 +1,6 @@
-// いちばん外のレイアウト。ログインとシートの状態で、見せる画面を決める。
-// シートが決まっていれば、ログインの確認を待たずに SQLite の中身を描く
+// いちばん外のレイアウト。ふだんはログインを待たずに、SQLite の中身で一覧を描く(アプリ内のリストは
+// ログインが要らない。スプレッドシートは設定の「保存先」からつなぐ)。招待リンクから開いたときだけ、
+// ログインと確認の画面を先に出す
 import "../global.css";
 
 import { useTokenColor } from "@shopping-list/ui-native";
@@ -17,6 +18,7 @@ import { config } from "../config.ts";
 import { useAccountOwner, useHasPending, usePendingInvite, useSheet } from "../data/hooks.ts";
 import { adoptAccount } from "../data/runtime.ts";
 import { accountCheck } from "../logic/account.ts";
+import { entryScreen } from "../logic/entry.ts";
 
 export default function RootLayout() {
   return (
@@ -37,7 +39,6 @@ function Root() {
   const owner = useAccountOwner();
   const hasPending = useHasPending();
   const canvas = useTokenColor("canvas");
-  const loading = auth.status === "loading";
   const email = auth.status === "signedIn" ? auth.user.email : undefined;
   const check =
     !config.demo && auth.status === "signedIn" ? accountCheck({ email, owner, hasLocalCopy: sheet !== null || hasPending }) : "ok";
@@ -47,27 +48,20 @@ function Root() {
     if (check === "adopt") adoptAccount(email);
   }, [check, email]);
 
-  if (!config.demo && loading && !sheet) {
+  const entry = entryScreen({ demo: config.demo, invited: invite !== null, auth: auth.status, blocked });
+  if (entry === "wait") {
     return <View className="flex-1 bg-canvas" />;
   }
-  const signedIn = (auth.status === "signedIn" && !blocked) || loading;
-  // 招待の確認はログインの後に出す
-  const join = !config.demo && auth.status === "signedIn" && !blocked && invite !== null;
-  const app = !join && (config.demo || (signedIn && sheet !== null));
-  const setup = !join && !config.demo && signedIn && sheet === null;
   return (
     <>
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
-        <Stack.Protected guard={app}>
+        <Stack.Protected guard={entry === "app"}>
           <Stack.Screen name="(app)" />
         </Stack.Protected>
-        <Stack.Protected guard={setup}>
-          <Stack.Screen name="setup" />
-        </Stack.Protected>
-        <Stack.Protected guard={join}>
+        <Stack.Protected guard={entry === "join"}>
           <Stack.Screen name="join" />
         </Stack.Protected>
-        <Stack.Protected guard={!app && !setup && !join}>
+        <Stack.Protected guard={entry === "signIn"}>
           <Stack.Screen name="sign-in" />
         </Stack.Protected>
       </Stack>

@@ -1,5 +1,5 @@
 import { Button, Field, Input, Sheet } from "@shopping-list/ui-native";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 interface NamePromptProps {
   open: boolean;
@@ -9,10 +9,12 @@ interface NamePromptProps {
   confirmLabel: string;
   onSubmit: (name: string) => void;
   onClose: () => void;
+  // 名前の下に足す入力(リストの保存先など)
+  children?: ReactNode;
 }
 
 // 名前を1つ入れる Sheet(リストやカテゴリの追加と名前の変更)
-export function NamePrompt({ open, title, label, initial = "", confirmLabel, onSubmit, onClose }: NamePromptProps) {
+export function NamePrompt({ open, title, label, initial = "", confirmLabel, onSubmit, onClose, children }: NamePromptProps) {
   const [name, setName] = useState(initial);
   useEffect(() => {
     if (open) setName(initial);
@@ -36,6 +38,7 @@ export function NamePrompt({ open, title, label, initial = "", confirmLabel, onS
       <Field label={label}>
         <Input autoFocus value={name} onChangeText={setName} onSubmitEditing={submit} returnKeyType="done" />
       </Field>
+      {children}
     </Sheet>
   );
 }

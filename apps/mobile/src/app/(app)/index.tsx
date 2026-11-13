@@ -1,5 +1,5 @@
 import type { ShoppingList } from "@shopping-list/core";
-import { ActionSheet, Badge, Button, ConfirmDialog, cx, Icon, PageHeader, Text } from "@shopping-list/ui-native";
+import { ActionSheet, Badge, Button, Chip, ConfirmDialog, cx, Icon, PageHeader, Text } from "@shopping-list/ui-native";
 import { router } from "expo-router";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
 import EllipsisVertical from "lucide-react-native/icons/ellipsis-vertical";
@@ -12,7 +12,8 @@ import { Pressable, ScrollView, View } from "react-native";
 import { NamePrompt } from "../../components/NamePrompt.tsx";
 import { NearbyShopping } from "../../components/NearbyShopping.tsx";
 import { SyncNoticeBar } from "../../components/SyncNoticeBar.tsx";
-import { useStrayItems, useTable } from "../../data/hooks.ts";
+import { DESTINATION_LABELS, type Destination } from "../../data/destination.ts";
+import { useListDestinations, useSheetsConnected, useStrayItems, useTable } from "../../data/hooks.ts";
 import { repository } from "../../data/runtime.ts";
 
 // リストの一覧
@@ -24,6 +25,12 @@ export default function Lists() {
   const [target, setTarget] = useState<ShoppingList | null>(null);
   const [renaming, setRenaming] = useState<ShoppingList | null>(null);
   const [deleting, setDeleting] = useState<ShoppingList | null>(null);
+  // 保存先は、スプレッドシートをつないでいるときだけ選ぶ。つないでいなければ全部がアプリ内
+  const connected = useSheetsConnected();
+  const destinations = useListDestinations();
+  const [newDest, setNewDest] = useState<Destination>("sheets");
+  const [moving, setMoving] = useState<ShoppingList | null>(null);
+  const movingTo: Destination = moving !== null && destinations.get(moving.id) === "local" ? "sheets" : "local";
 
   const remaining = useMemo(() => {
     const counts = new Map<string, number>();
@@ -40,7 +47,11 @@ export default function Lists() {
           title="買い物リスト"
           actions={
             <View className="flex-row">
-              <Button icon variant="ghost" accessibilityLabel="リストを追加" onPress={() => setAdding(true)}>
+              <Button icon variant="ghost" accessibilityLabel="リストを追加" onPress={() => {
+                  setNewDest("sheets");
+                  setAdding(true);
+                }}
+              >
                 <Icon icon={Plus} size={22} />
               </Button>
               <Button icon variant="ghost" accessibilityLabel="設定" onPress={() => router.push("/settings")}>
@@ -61,7 +72,12 @@ export default function Lists() {
                   onPress={() => router.push(`/lists/${list.id}`)}
                   className="min-h-20 min-w-0 flex-1 flex-row items-center gap-3 pl-5 active:bg-surface-muted"
                 >
-                  <Text className="min-w-0 shrink text-lg font-medium">{list.name}</Text>
+                  <View className="min-w-0 shrink">
+                    <Text className="text-lg font-medium">{list.name}</Text>
+                    {connected && destinations.get(list.id) === "local" && (
+                      <Text className="text-xs text-fg-muted">{DESTINATION_LABELS.local}</Text>
+                    )}
+                  </View>
                   {(remaining.get(list.id) ?? 0) > 0 && (
                     <View>
                       <Badge>{remaining.get(list.id) ?? 0}</Badge>
@@ -101,9 +117,25 @@ export default function Lists() {
         title="リストを追加"
         label="リストの名前"
         confirmLabel="追加する"
-        onSubmit={(name) => repository.addList(name)}
+        onSubmit={(name) => repository.addList(name, connected ? newDest : undefined)}
         onClose={() => setAdding(false)}
-      />
+      >
+        {connected && (
+          <View className="gap-2">
+            <Text className="text-sm font-medium">保存先</Text>
+            <View className="flex-row flex-wrap gap-2">
+              {(["sheets", "local"] as const).map((dest) => (
+                <Chip key={dest} selected={newDest === dest} onPress={() => setNewDest(dest)}>
+                  {DESTINATION_LABELS[dest]}
+                </Chip>
+              ))}
+            </View>
+            <Text className="text-xs text-fg-muted">
+              {newDest === "sheets" ? "シートを共有している相手と一緒に使えます。" : "この端末だけに保存し、共有しません。"}
+            </Text>
+          </View>
+        )}
+      </NamePrompt>
       <NamePrompt
         open={renaming !== null}
         title="名前を変える"
@@ -120,6 +152,7 @@ export default function Lists() {
         items={[
           { label: "名前を変える", onPress: () => setRenaming(target) },
           { label: "品目の管理", onPress: () => target && router.push(`/lists/${target.id}/registered`) },
+          ...(connected ? [{ label: "保存先を変える", onPress: () => setMoving(target) }] : []),
           { label: "削除する", tone: "danger", onPress: () => setDeleting(target) },
         ]}
       />
@@ -134,6 +167,22 @@ export default function Lists() {
           setDeleting(null);
         }}
         onCancel={() => setDeleting(null)}
+      />
+      <ConfirmDialog
+        open={moving !== null}
+        tone={movingTo === "local" ? "danger" : undefined}
+        title={`「${moving?.name ?? ""}」を${DESTINATION_LABELS[movingTo]}へ移しますか`}
+        description={
+          movingTo === "local"
+            ? "スプレッドシートから消え、一緒に使っている相手のリストからも消えます。品目や店舗は、この端末にだけ残ります。"
+            : "品目や店舗、買い物の記録をスプレッドシートへ送ります。シートを共有している相手も使えるようになります。"
+        }
+        confirmLabel={`${DESTINATION_LABELS[movingTo]}へ移す`}
+        onConfirm={() => {
+          if (moving) repository.moveList(moving.id, movingTo);
+          setMoving(null);
+        }}
+        onCancel={() => setMoving(null)}
       />
     </View>
   );

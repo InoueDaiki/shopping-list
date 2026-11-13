@@ -12,11 +12,11 @@ export function syncNotice(status: SyncStatus, pending: number): SyncNotice | nu
     case "offline":
       return pending > 0 ? { tone: "info", text: `つながっていません。${waiting}つながったら送ります。` } : null;
     case "auth":
-      return { tone: "danger", text: `ログインが切れました。${waiting}ログインし直してください。` };
+      return { tone: "danger", text: `ログインが切れました。${waiting}設定の「保存先」からログインし直してください。` };
     case "forbidden":
       return { tone: "danger", text: `シートへの権限がありません。${waiting}持ち主に「編集者」の権限をもらってください。` };
     case "notFound":
-      return { tone: "danger", text: `シートが見つかりません。${waiting}アカウントの画面から別のシートへ切り替えられます。` };
+      return { tone: "danger", text: `シートが見つかりません。${waiting}設定の「保存先」から別のシートへ切り替えられます。` };
     case "schema":
       return { tone: "danger", text: `シートの形が合いません。${waiting}アプリを更新するか、シートの見出しを確かめてください。` };
     case "invalid":

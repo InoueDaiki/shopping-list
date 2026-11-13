@@ -6,6 +6,7 @@ import type { SyncStatus } from "../data/syncRunner.ts";
 import { accountCheck, ownerValue } from "./account.ts";
 import { categoryToneMap } from "./categoryTone.ts";
 import { formatCoordinates, geoUrl, parseCoordinates } from "./coordinates.ts";
+import { entryScreen } from "./entry.ts";
 import { inviteLink, inviteMessage, parseInviteLink } from "./invite.ts";
 import { itemRowIndex, listRows, openItemNamed } from "./listRows.ts";
 import {
@@ -296,5 +297,30 @@ describe("syncCadence", () => {
 
   it("買い物中は30秒ごとのまま", () => {
     expect(syncCadence({ ...base, shopping: true, viewingListId: null }).intervalMs).toBe(SHOPPING_SYNC_INTERVAL_MS);
+  });
+});
+
+describe("entryScreen", () => {
+  const base = { demo: false, invited: false, auth: "signedOut", blocked: false } as const;
+
+  it("招待が無ければ、ログインしていなくても一覧を出す", () => {
+    expect(entryScreen(base)).toBe("app");
+    expect(entryScreen({ ...base, auth: "loading" })).toBe("app");
+    expect(entryScreen({ ...base, auth: "signedIn", blocked: true })).toBe("app");
+  });
+
+  it("招待があれば、ログインを確かめてから確認へ進める", () => {
+    expect(entryScreen({ ...base, invited: true, auth: "loading" })).toBe("wait");
+    expect(entryScreen({ ...base, invited: true })).toBe("signIn");
+    expect(entryScreen({ ...base, invited: true, auth: "signingIn" })).toBe("signIn");
+    expect(entryScreen({ ...base, invited: true, auth: "signedIn" })).toBe("join");
+  });
+
+  it("写しの持ち主の確認が済むまで、招待の確認を出さない", () => {
+    expect(entryScreen({ ...base, invited: true, auth: "signedIn", blocked: true })).toBe("signIn");
+  });
+
+  it("デモモードは招待を見ない", () => {
+    expect(entryScreen({ ...base, demo: true, invited: true })).toBe("app");
   });
 });

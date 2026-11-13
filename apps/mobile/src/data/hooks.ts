@@ -3,6 +3,8 @@
 import { sectionItems, withoutForgotten, type Id, type ListDirection, type SyncTable, type TableRows } from "@shopping-list/core";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
+import { config } from "../config.ts";
+import type { Destination } from "./destination.ts";
 import { SESSION_KEY } from "./repository.ts";
 import { INVITE_KEY, localStore, orderForStore, OWNER_KEY, repository, SHEET_KEY, syncRunner } from "./runtime.ts";
 import type { SheetRef } from "./spreadsheet.ts";
@@ -38,6 +40,16 @@ function useSetting(key: string): string | null {
 export function useSheet(): SheetRef | null {
   const stored = useSetting(SHEET_KEY);
   return useMemo(() => (stored === null ? null : (JSON.parse(stored) as SheetRef)), [stored]);
+}
+
+// スプレッドシートをつないでいるか。つないでいなければ、すべてのリストがアプリ内にある
+export function useSheetsConnected(): boolean {
+  return useSetting(SHEET_KEY) !== null && !config.demo;
+}
+
+// リストごとの保存先
+export function useListDestinations(): ReadonlyMap<Id, Destination> {
+  return useSyncExternalStore((listener) => localStore.subscribe("lists", listener), localStore.listDestinations);
 }
 
 export function usePendingInvite(): string | null {
