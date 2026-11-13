@@ -7,7 +7,6 @@ import { Page } from "../../../components/Page.tsx";
 
 const ENTRIES: readonly { label: string; href: Href }[] = [
   { label: "店舗とカテゴリの順番", href: "/settings/stores" },
-  { label: "カテゴリ", href: "/settings/categories" },
   { label: "アカウント", href: "/settings/account" },
 ];
 

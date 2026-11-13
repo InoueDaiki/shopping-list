@@ -1,5 +1,5 @@
 import type { Id, Item, ShoppingList } from "@shopping-list/core";
-import { ActionSheet, Badge, Button, Icon, PageHeader, Text } from "@shopping-list/ui-native";
+import { ActionSheet, Button, Icon, PageHeader, Text } from "@shopping-list/ui-native";
 import { router } from "expo-router";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
 import { useCallback, useMemo, useState } from "react";
@@ -9,8 +9,8 @@ import { SwipeToDelete } from "../../components/SwipeToDelete.tsx";
 import { UndoNotice } from "../../components/UndoNotice.tsx";
 import { usePendingDelete } from "../../components/usePendingDelete.ts";
 import { useStrayItems, useTable } from "../../data/hooks.ts";
+import { moveStrayItem } from "../../data/addItem.ts";
 import { repository } from "../../data/runtime.ts";
-import { categoryToneMap } from "../../logic/categoryTone.ts";
 
 const deleteItem = (item: Item) => repository.deleteItem(item.id);
 const itemKey = (item: Item) => item.id;
@@ -20,41 +20,35 @@ interface Moved {
   list: ShoppingList;
 }
 
-// 未整理の品目(どのリストにも属さない野良品目)。押すとリストを選んで移し、払うと消す
+// 未整理の品目(どのリストにも属さない野良品目)。押すとリストを選んで移し、払うと消す。
+// カテゴリはリストのものなので、ここには出さない(移したときに決まる)
 export default function StrayItems() {
   const strays = useStrayItems();
   const lists = useTable("lists");
-  const categories = useTable("categories");
   const { pending, hiddenKey, remove, undo } = usePendingDelete(deleteItem, itemKey);
   const [target, setTarget] = useState<Item | null>(null);
   const [moved, setMoved] = useState<Moved | null>(null);
-  const tones = useMemo(() => categoryToneMap(categories), [categories]);
-  const names = useMemo(() => new Map(categories.map((row) => [row.id, row.name])), [categories]);
   const shown = useMemo(() => strays.filter((item) => item.id !== hiddenKey), [strays, hiddenKey]);
 
   const moveTo = useCallback((item: Item, list: ShoppingList) => {
-    if (repository.moveStrayItem(item.id, list.id)) setMoved({ name: item.name, list });
+    if (moveStrayItem(item.id, list.id)) setMoved({ name: item.name, list });
   }, []);
 
   const renderItem = useCallback(
-    ({ item }: { item: Item }) => {
-      const category = item.categoryId === null ? undefined : names.get(item.categoryId);
-      return (
-        <SwipeToDelete label={item.name} onDelete={() => remove(item)}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${item.name}。リストへ移す`}
-            onPress={() => setTarget(item)}
-            className="min-h-14 flex-row items-center gap-3 border-b border-border bg-surface px-4 py-2 active:bg-surface-muted"
-          >
-            <Text className="min-w-0 flex-1">{item.name}</Text>
-            <Badge tone={(item.categoryId === null ? undefined : tones.get(item.categoryId)) ?? "neutral"}>{category ?? "未分類"}</Badge>
-            <Icon icon={ChevronRight} size={20} color="fg-muted" />
-          </Pressable>
-        </SwipeToDelete>
-      );
-    },
-    [names, tones, remove],
+    ({ item }: { item: Item }) => (
+      <SwipeToDelete label={item.name} onDelete={() => remove(item)}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${item.name}。リストへ移す`}
+          onPress={() => setTarget(item)}
+          className="min-h-14 flex-row items-center gap-3 border-b border-border bg-surface px-4 py-2 active:bg-surface-muted"
+        >
+          <Text className="min-w-0 flex-1">{item.name}</Text>
+          <Icon icon={ChevronRight} size={20} color="fg-muted" />
+        </Pressable>
+      </SwipeToDelete>
+    ),
+    [remove],
   );
 
   const open = (listId: Id) => {

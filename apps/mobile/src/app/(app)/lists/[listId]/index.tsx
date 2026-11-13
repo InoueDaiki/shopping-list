@@ -18,7 +18,7 @@ import { MemoSheet } from "../../../../components/MemoSheet.tsx";
 import { StoreSheet } from "../../../../components/StoreSheet.tsx";
 import { SyncNoticeBar } from "../../../../components/SyncNoticeBar.tsx";
 import { useRowHighlight } from "../../../../components/useRowHighlight.ts";
-import { useSections, useShopping, useTable } from "../../../../data/hooks.ts";
+import { useListCategories, useSections, useShopping, useTable } from "../../../../data/hooks.ts";
 import { repository, syncRunner } from "../../../../data/runtime.ts";
 import { categoryToneMap } from "../../../../logic/categoryTone.ts";
 import { listRows, type ListRow } from "../../../../logic/listRows.ts";
@@ -33,7 +33,7 @@ const itemKey = (item: Item) => item.id;
 export default function ListScreen() {
   const { listId } = useLocalSearchParams<{ listId: Id }>();
   const lists = useTable("lists");
-  const categories = useTable("categories");
+  const categories = useListCategories(listId);
   const stores = useTable("stores");
   const session = useShopping(listId);
   const storeId = session?.storeId ?? null;

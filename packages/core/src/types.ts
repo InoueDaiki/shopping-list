@@ -16,6 +16,9 @@ export interface Category {
   name: string;
   sort: number;
   updatedAt: Iso;
+  // 属するリスト。カテゴリのマスタはリストごとに持つ。null は版 7 までの共通のカテゴリで、
+  // リストごとに分ける移行の途中(splitSharedCategories)。画面には出さない
+  listId: Id | null;
 }
 
 export interface Store {

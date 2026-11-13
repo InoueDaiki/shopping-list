@@ -1,5 +1,5 @@
 // デモモードの初期データ。シートにつながず、端末の確かめと E2E に使う。中身は架空のもの
-import type { Category, HistoryEntry, Id, LocalChange } from "@shopping-list/core";
+import { categoriesOfList, type HistoryEntry, type Id, type LocalChange } from "@shopping-list/core";
 
 import type { SqliteLocalStore } from "./localStore.ts";
 import type { Repository } from "./repository.ts";
@@ -9,7 +9,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 interface SeedInput {
   store: SqliteLocalStore;
   repository: Repository;
-  categories: readonly Category[];
   newId: () => Id;
   now: Date;
 }
@@ -22,11 +21,14 @@ const PAST_ITEMS: readonly (readonly [string, string])[] = [
   ["トマト", "野菜"],
 ];
 
-export function seedDemo({ store, repository, categories, newId, now }: SeedInput): void {
-  if (store.rows("categories").length > 0) return;
-  store.commitNow(categories.map((row): LocalChange => ({ action: "put", table: "categories", row })));
+export function seedDemo({ store, repository, newId, now }: SeedInput): void {
+  // 前の版のデモの写しが残っていれば、共通のカテゴリをリストごとに分ける(デモは同期しないので、ここで呼ぶ)
+  repository.splitSharedCategories();
+  if (store.rows("lists").length > 0 || store.rows("categories").length > 0) return;
+  // リストを足すと、初期のカテゴリもそのリストに入る
   const listId = repository.addList("スーパー");
   repository.addList("ドラッグストア");
+  const categories = categoriesOfList(store.rows("categories"), listId);
   const category = (name: string) => categories.find((row) => row.name === name)?.id ?? null;
   const item = (name: string, categoryName: string, memo = "") => {
     const added = repository.addItem(listId, name, { categoryId: category(categoryName), categorySource: "history" });
@@ -39,8 +41,8 @@ export function seedDemo({ store, repository, categories, newId, now }: SeedInpu
   item("食パン", "パン");
   repository.addItem(listId, "ふしぎな品物", { categoryId: null, categorySource: null });
   // どのリストにも属さない品目(野良品目)。リスト一覧の「未整理」から移す
-  repository.addStrayItem("ハンドソープ", { categoryId: category("日用品"), categorySource: "history" });
-  repository.addStrayItem("ふしぎな置き物", { categoryId: null, categorySource: null });
+  repository.addStrayItem("ハンドソープ");
+  repository.addStrayItem("ふしぎな置き物");
   store.commitNow(
     PAST_ITEMS.map(([name, categoryName], index): LocalChange => {
       const row: HistoryEntry = {

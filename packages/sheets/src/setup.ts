@@ -1,10 +1,9 @@
 // スプレッドシートの作成と、作るときの batchUpdate の組み立て。
 
-import { RemoteError, type Category } from "@shopping-list/core";
+import { RemoteError } from "@shopping-list/core";
 
 import { rowData } from "./cells.ts";
 import type { Cell, SheetsClient, SheetsRequest, ValueRange } from "./client.ts";
-import { encodeRow } from "./codec.ts";
 import {
   ID_LIST_PATTERN,
   ID_PATTERN,
@@ -12,7 +11,6 @@ import {
   META_SHEET,
   SCHEMA_VERSION,
   SHEETS,
-  TABLE_SHEETS,
   addedSince,
   columnLetter,
   headerRange,
@@ -21,32 +19,6 @@ import {
   type SheetName,
   type Upgrade,
 } from "./schema.ts";
-
-const CATEGORY_NAMES: readonly (readonly [string, string])[] = [
-  ["seafood", "鮮魚"],
-  ["meat", "生肉"],
-  ["dairy", "乳製品"],
-  ["vegetables", "野菜"],
-  ["fruit", "果物"],
-  ["eggs", "卵"],
-  ["tofu_natto", "豆腐・納豆"],
-  ["bread", "パン"],
-  ["noodles_rice", "麺・米"],
-  ["seasonings", "調味料"],
-  ["frozen", "冷凍"],
-  ["snacks", "菓子"],
-  ["drinks", "飲料"],
-  ["alcohol", "酒"],
-  ["household", "日用品"],
-  ["medicine", "医薬品"],
-];
-
-// 初期のカテゴリの版。どの編集よりも古い固定の値にする
-const SEED_AT = "2000-01-01T00:00:00.000Z";
-
-export const INITIAL_CATEGORIES: readonly Category[] = CATEGORY_NAMES.map(
-  ([key, name], index) => ({ id: `cat_${key}`, name, sort: index + 1, updatedAt: SEED_AT }),
-);
 
 const TEXT_KINDS: ReadonlySet<Column["kind"]> = new Set([
   "id",
@@ -320,7 +292,7 @@ function upgradeRequests(survey: SpreadsheetSurvey): {
       fields: "userEnteredValue",
     },
   };
-  return { requests: [...columns, ...buildAddRequests(placed, null, []), version], placed };
+  return { requests: [...columns, ...buildAddRequests(placed, null), version], placed };
 }
 
 // 前の版のシートを、データを失わずに今の版へ上げ、上げた後の形を返す。今の版なら何もしない。
@@ -368,18 +340,12 @@ function withFreeSheetIds(defs: readonly SheetDef[], used: readonly number[]): S
   });
 }
 
-// シートを足す要求。defaultSheetId は消してよい既定のシート(自分で作ったものだけ渡す)
-function buildAddRequests(
-  defs: readonly SheetDef[],
-  defaultSheetId: number | null,
-  categories: readonly Category[],
-): SheetsRequest[] {
-  const seeds = defs.flatMap((def): SheetsRequest[] => {
-    if (def.name === TABLE_SHEETS.categories.name) {
-      return [seed(def, categories.map((category) => encodeRow("categories", category)))];
-    }
-    return def.name === META_SHEET.name ? [seed(def, [[SCHEMA_VERSION]])] : [];
-  });
+// シートを足す要求。defaultSheetId は消してよい既定のシート(自分で作ったものだけ渡す)。
+// カテゴリはリストごとに持つので、ここでは入れない(リストを足すときに端末が入れる)
+function buildAddRequests(defs: readonly SheetDef[], defaultSheetId: number | null): SheetsRequest[] {
+  const seeds = defs.flatMap((def): SheetsRequest[] =>
+    def.name === META_SHEET.name ? [seed(def, [[SCHEMA_VERSION]])] : [],
+  );
   return [
     ...defs.map(addSheet),
     ...(defaultSheetId === null ? [] : [{ deleteSheet: { sheetId: defaultSheetId } }]),
@@ -391,11 +357,8 @@ function buildAddRequests(
 }
 
 // 作成直後の batchUpdate の要求。defaultSheetId は create が作った最初のシートで、最後に消す
-export function buildSetupRequests(
-  defaultSheetId: number,
-  categories: readonly Category[] = INITIAL_CATEGORIES,
-): SheetsRequest[] {
-  return buildAddRequests(SHEETS, defaultSheetId, categories);
+export function buildSetupRequests(defaultSheetId: number): SheetsRequest[] {
+  return buildAddRequests(SHEETS, defaultSheetId);
 }
 
 export interface EnsureOptions {
@@ -422,11 +385,7 @@ export async function ensureSpreadsheet(
   const removable = defaultSheetId !== null && allSheetIds.includes(defaultSheetId);
   await client.batchUpdate(
     spreadsheetId,
-    buildAddRequests(
-      withFreeSheetIds(defs, allSheetIds),
-      removable ? defaultSheetId : null,
-      INITIAL_CATEGORIES,
-    ),
+    buildAddRequests(withFreeSheetIds(defs, allSheetIds), removable ? defaultSheetId : null),
   );
 }
 
@@ -454,7 +413,7 @@ export async function beginSpreadsheet(
   };
 }
 
-// 1人目の初期化。シートを作り、規則と初期のカテゴリを入れる
+// 1人目の初期化。シートを作り、規則を入れる
 export async function createSpreadsheet(
   client: SheetsClient,
   title: string,

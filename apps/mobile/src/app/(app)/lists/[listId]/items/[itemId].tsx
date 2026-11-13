@@ -4,16 +4,17 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
 
 import { Page } from "../../../../../components/Page.tsx";
-import { useTable } from "../../../../../data/hooks.ts";
+import { useListCategories, useTable } from "../../../../../data/hooks.ts";
 import { repository } from "../../../../../data/runtime.ts";
 
 const UNCATEGORIZED = "none";
 
 // 品目の編集。カテゴリを直すと、次から同じ品目に使われる
 export default function EditItem() {
-  const { itemId } = useLocalSearchParams<{ itemId: Id }>();
+  const { listId, itemId } = useLocalSearchParams<{ listId: Id; itemId: Id }>();
   const items = useTable("items");
-  const categories = useTable("categories");
+  // 選べるのは、このリストのカテゴリだけ
+  const categories = useListCategories(listId);
   const item = items.find((row) => row.id === itemId);
   const [name, setName] = useState(item?.name ?? "");
   const [memo, setMemo] = useState(item?.memo ?? "");

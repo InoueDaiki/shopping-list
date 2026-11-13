@@ -9,7 +9,7 @@ import { historyFixture } from "./test-support.ts";
 import type { Category, HistoryEntry } from "./types.ts";
 
 function category(id: string, name: string): Category {
-  return { id, name, sort: 1, updatedAt: "2028-01-01T00:00:00.000Z" };
+  return { id, name, sort: 1, updatedAt: "2028-01-01T00:00:00.000Z", listId: "list-a" };
 }
 
 const master = Object.keys(INFERENCE_DICTIONARY).map((name, index) => category(`cat-${index}`, name));

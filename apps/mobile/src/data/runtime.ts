@@ -2,13 +2,14 @@
 import {
   DEFAULT_RATE_LIMITS,
   RateBudget,
+  rehomeHistory,
   SyncEngine,
   withoutForgotten,
   type HistoryEntry,
   type Id,
   type SyncResult,
 } from "@shopping-list/core";
-import { INITIAL_CATEGORIES, SheetsClient, SheetsRemote, type FetchLike } from "@shopping-list/sheets";
+import { SheetsClient, SheetsRemote, type FetchLike } from "@shopping-list/sheets";
 
 import { auth, getAccessToken, signOut } from "../auth.ts";
 import { config } from "../config.ts";
@@ -43,23 +44,36 @@ export const localStore = new SqliteLocalStore(openDatabase(config.demo ? "demo.
 
 const orders = new OrderCache();
 
-export function orderForStore(storeId: Id | null): readonly Id[] {
-  return orders.orderFor(storeId, {
-    categories: localStore.rows("categories"),
-    history: localStore.rows("history"),
-    storeOrders: localStore.rows("storeOrders"),
-    now: nowIso(),
-  });
+// 履歴。History は書き換えられず、共通だったころのカテゴリの ID が残るので、そのリストのカテゴリの
+// ID に読み替える(rehomeHistory)。履歴のカテゴリを見るところは、表を直に読まずこれを使う。
+// 元の表が変わるまで同じ配列を返す
+let rehomed: { history: unknown; categories: unknown; rows: readonly HistoryEntry[] } | null = null;
+
+export function storedHistory(): readonly HistoryEntry[] {
+  const history = localStore.rows("history");
+  const categories = localStore.rows("categories");
+  if (rehomed?.history !== history || rehomed.categories !== categories) {
+    rehomed = { history, categories, rows: rehomeHistory(history, categories) };
+  }
+  return rehomed.rows;
 }
 
-function learnedOrder(storeId: Id | null): readonly Id[] | null {
+const orderSources = () => ({
+  categories: localStore.rows("categories"),
+  stores: localStore.rows("stores"),
+  history: storedHistory(),
+  storeOrders: localStore.rows("storeOrders"),
+  now: nowIso(),
+});
+
+// listId は開いているリスト。リストの決まっていない店舗と、店舗が決まっていないときのカテゴリを決める
+export function orderForStore(storeId: Id | null, listId: Id | null): readonly Id[] {
+  return orders.orderFor(storeId, listId, orderSources());
+}
+
+function learnedOrder(storeId: Id | null, listId: Id): readonly Id[] | null {
   if (storeId === null) return null;
-  return orders.learnedOrderFor(storeId, {
-    categories: localStore.rows("categories"),
-    history: localStore.rows("history"),
-    storeOrders: localStore.rows("storeOrders"),
-    now: nowIso(),
-  });
+  return orders.learnedOrderFor(storeId, listId, orderSources());
 }
 
 // 忘れた品目名の分を除いた履歴。候補、よく使う品目、カテゴリの引き当て、推定の学習はこれを使い、
@@ -67,7 +81,7 @@ function learnedOrder(storeId: Id | null): readonly Id[] | null {
 let remembered: { history: unknown; forgotten: unknown; rows: readonly HistoryEntry[] } | null = null;
 
 export function rememberedHistory(): readonly HistoryEntry[] {
-  const history = localStore.rows("history");
+  const history = storedHistory();
   const forgotten = localStore.rows("forgottenItems");
   if (remembered?.history !== history || remembered.forgotten !== forgotten) {
     remembered = { history, forgotten, rows: withoutForgotten(history, forgotten) };
@@ -170,8 +184,10 @@ export const syncRunner = new SyncRunner({
     if (result.pulled && !result.issues.some((issue) => issue.table === "lists")) {
       repository.removeOrphanItems();
       repository.removeOrphanForgottenItems();
+      repository.removeOrphanCategories();
       repository.assignStoreLists();
       repository.removeOrphanStores();
+      repository.splitSharedCategories();
     }
     syncRunner.setShopping(repository.isShopping());
   },
@@ -181,7 +197,7 @@ export const syncRunner = new SyncRunner({
 localStore.subscribe("settings", () => syncRunner.setShopping(repository.isShopping()));
 
 if (config.demo) {
-  seedDemo({ store: localStore, repository, categories: INITIAL_CATEGORIES, newId, now: new Date() });
+  seedDemo({ store: localStore, repository, newId, now: new Date() });
 } else {
   // 画面の書き込みのたびに、少し遅らせて送る
   localStore.subscribe("pending", () => {
