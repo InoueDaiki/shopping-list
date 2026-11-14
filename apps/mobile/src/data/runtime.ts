@@ -46,7 +46,7 @@ function sheetsConnected(): boolean {
 // デモの端末で本物の写しを壊さないよう、ファイルも分ける
 export const localStore: SqliteLocalStore = new SqliteLocalStore(openDatabase(config.demo ? "demo.db" : "shopping.db"), {
   recordPending: !config.demo,
-  // 野良品目など、親の無い行の保存先
+  // 保存先を指定しない新しいリストなどの保存先
   defaultDest: (): Destination => (sheetsConnected() ? "sheets" : "local"),
 });
 

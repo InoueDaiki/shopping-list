@@ -604,12 +604,12 @@ describe("Repository", () => {
       expect(itemOf(item.id)).toBeDefined();
     });
 
-    it("消すと墓石を送る", () => {
-      const item = stray("架空の牛乳")!;
+    it("アプリ内に置くので、足しても消しても送らない", () => {
       const pending = store.pendingCountNow();
+      const item = stray("架空の牛乳")!;
       repo.deleteItem(item.id);
       expect(itemOf(item.id)).toBeUndefined();
-      expect(store.pendingCountNow()).toBe(pending + 1);
+      expect(store.pendingCountNow()).toBe(pending);
     });
   });
 
@@ -1071,15 +1071,16 @@ describe("リストの保存先", () => {
     expect(store.pendingCountNow()).toBe(0);
   });
 
-  it("野良品目をリストへ移すと、そのリストの保存先へ移る", async () => {
-    const listId = repo.addList("架空のリスト", "local");
+  it("野良品目はアプリ内に置き、リストへ移すとそのリストの保存先へ移る", async () => {
+    const listId = repo.addList("架空の共有リスト", "sheets");
     const stray = repo.addStrayItem("架空の品物")!;
     await engine.sync();
-    expect(remote.rows.items).toHaveLength(1);
+    expect((await live()).items).toEqual([]);
+    expect(store.rows("items")).toMatchObject([{ id: stray.id, listId: null }]);
     clock += 1000;
     repo.moveStrayItem(stray.id, listId);
     await engine.sync();
-    expect((await live()).items).toEqual([]);
+    expect((await live()).items).toMatchObject([{ id: stray.id, listId }]);
     expect(store.rows("items")).toMatchObject([{ id: stray.id, listId }]);
   });
 

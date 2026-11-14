@@ -357,15 +357,30 @@ describe("保存先", () => {
     expect(await store.pendingCount()).toBe(1);
   });
 
-  it("親の無い新しい行は既定の保存先に置き、書き直しても保つ", async () => {
+  it("保存先を指定しない新しいリストは既定の保存先に置き、書き直しても保つ", async () => {
     let dest: "local" | "sheets" = "local";
     const own = new SqliteLocalStore(openTestDatabase(), { defaultDest: () => dest });
-    own.commitNow([put(item({ id: "stray", listId: null }))]);
+    own.commitNow([{ action: "put", table: "lists", row: LOCAL_LIST }]);
     dest = "sheets";
-    own.commitNow([put(item({ id: "stray", listId: null, memo: "直した" }))]);
+    own.commitNow([{ action: "put", table: "lists", row: { ...LOCAL_LIST, name: "名前を変えた" } }]);
     expect(await own.pendingCount()).toBe(0);
-    own.commitNow([put(item({ id: "stray-2", listId: null }))]);
+    own.commitNow([{ action: "put", table: "lists", row: SHEET_LIST }]);
     expect(await own.pendingCount()).toBe(1);
+  });
+
+  it("野良品目は、スプレッドシートをつないでいてもアプリ内に置く", async () => {
+    const before = await store.pendingCount();
+    store.commitNow([put(item({ id: "stray", listId: null }))]);
+    store.commitNow([{ action: "delete", table: "items", id: "stray", at: LATER }]);
+    expect(await store.pendingCount()).toBe(before);
+  });
+
+  it("前の版がシートに置いた野良品目は、消すとシートからも消す", async () => {
+    await store.applyRemote(emptyApply({
+      tables: { ...emptyApply().tables, lists: [SHEET_LIST], items: [item({ id: "stray", listId: null })] },
+    }));
+    store.commitNow([{ action: "delete", table: "items", id: "stray", at: LATER }]);
+    expect((await pendingChanges()).at(-1)).toEqual({ action: "delete", table: "items", id: "stray", at: LATER });
   });
 
   it("アプリ内の行をスプレッドシートのリストへ移すと、行を足す操作を積む", async () => {

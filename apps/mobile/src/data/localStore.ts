@@ -218,7 +218,7 @@ const HISTORY_CURSOR_KEY = "historyCursor";
 export interface SqliteLocalStoreOptions {
   // false なら送信待ちを積まない(デモモード。送り先が無い)
   recordPending?: boolean;
-  // 親の無い新しい行(野良品目など)と、保存先を指定しない新しいリストの保存先。
+  // 保存先を指定しない新しいリストと、親の無い新しい行(リストの決まっていない店舗など)の保存先。
   // スプレッドシートをつないでいれば sheets、いなければ local を返す。無ければ sheets
   defaultDest?: () => Destination;
   // 保存先を移すときの、シートの行を消す時刻。無ければ今
@@ -399,7 +399,8 @@ export class SqliteLocalStore implements LocalStore {
     return this.#db.all<{ dest: Destination }>(`SELECT dest FROM ${table} WHERE ${key} = ?`, [id])[0]?.dest ?? null;
   }
 
-  // 書く行の保存先。親があれば親の保存先、無ければ今の保存先、新しい行は既定の保存先
+  // 書く行の保存先。親があれば親の保存先、無ければ今の保存先、新しい行は既定の保存先。
+  // 野良品目(リストの無い品目)は、リストへ移すまでアプリ内に置く
   #destFor(change: RowOf, current: Destination | null, options: CommitOptions): Destination {
     if (change.table === "lists") return options.listDest ?? current ?? this.#defaultDest();
     let parent: Destination | null = null;
@@ -408,6 +409,7 @@ export class SqliteLocalStore implements LocalStore {
     } else if (LIST_CHILD_TABLES.has(change.table)) {
       const { listId } = change.row as { listId?: Id | null };
       if (typeof listId === "string") parent = this.#destOf("lists", "id", listId);
+      else if (change.table === "items") return current ?? "local";
     }
     return parent ?? current ?? this.#defaultDest();
   }
